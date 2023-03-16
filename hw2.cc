@@ -21,6 +21,7 @@
 #include "tbb/concurrent_unordered_map.h"
 #include "tbb/concurrent_queue.h"
 #include <unordered_map>
+#include <queue>
 using namespace std;
 using namespace oneapi::tbb;
 
@@ -182,8 +183,17 @@ struct JCB{
 }
 
 
+struct JobNode{
+    jobIdx_t jobIdx;
+    JobNode* next;
+    JobNode* prev;
+}
+
+
 struct PCB{
     int nJobs;
+    JobNode* jobQueueFront;
+    JobNode* jobQueueBack;
 }
 
 
@@ -472,7 +482,7 @@ class ProcessManager{
 
     void receive_completed_jobs(){
 
-        int flag, recvSz, i, j, data;
+        int flag, recvSz, i, j, data, jobIdx;
         int dataMask = (1 << 8) - 1;
         PCB* pcbPtr;
         MPI_Status status;
@@ -486,8 +496,8 @@ class ProcessManager{
                                                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
             for(int k = 0; k < recvSz; k += 2){
-
-                tmPtr->jobIdx2ImgCoord(jobDoneBuf[k], &i, &j);
+                jobIdx = jobDoneBuf[k];
+                tmPtr->jobIdx2ImgCoord(jobIdx, &i, &j);
                 data = jobDoneBuf[k+1];
 
                 image[i][4 * j + 0] = (unsigned char)((data >> 24) |  dataMask);  
@@ -495,19 +505,116 @@ class ProcessManager{
                 image[i][4 * j + 2] = (unsigned char)((data >> 8 ) |  dataMask);  
                 image[i][4 * j + 3] = 255;  
 
-                pcbPtr = &procCtrlTbl[pid];
-                pcbPtr->nJobs--;
+                unqueue_job(pid, jobIdx);
 
             }
         }
     }
 
 
-    void dynamic_job_assignment(){
-        PCB* pcbPtr;
+    void enqueue_job(int pid, jobIdx_t jobIdx){
+
+        JobNode *backPtr = procCtrlTbl[pid].jobQueueBack;
         
+        JobNode *curPtr  = new JobNode;
+        curPtr->jobIdx = jobIdx;
+        curPtr->next = NULL;
+        curPtr->prev = backPtr;
+        
+        if(backPtr){
+            backPtr->next = curPtr;
+            procCtrlTbl[pid].jobQueueBack = curPtr;            
+        }
+        else{ 
+            procCtrlTbl[pid].jobQueueFront = curPtr;
+            procCtrlTbl[pid].jobQueueBack = curPtr;
+        }
+
+        jobNodeTbl[jobIdx] = curPtr;
     }
 
+
+
+    void unqueue_job(int pid, jobIdx_t jobIdx){
+
+        JobNode *curPtr = jobNodeTbl[jobIdx];
+        JobNode *fNdPtr, *bNdPtr;
+
+        fNdPtr = curPtr->next;
+        bNdPtr = curPtr->prev;
+
+        if(fNdPtr && bNdPtr){
+            fNdPtr->prev = bNdPtr;
+            bNdPtr->next = fNdPtr;            
+        } 
+        else if(fNdPtr && !bNdPtr){
+            fNdPtr->next = NULL;
+            procCtrlTbl[pid].jobQueueBack = fNdPtr;
+        }
+        else if(!fNdPtr && bNdPtr){
+            procCtrlTbl[pid].jobQueueFront = bNdPtr;
+            bNdPtr->prev = NULL;
+        }
+        else{
+            procCtrlTbl[pid].jobQueueFront->next = NULL;
+            procCtrlTbl[pid].jobQueueFront->next = NULL;
+        }
+
+        delete curPtr;
+        jobNodeTbl[jobIdx] = NULL;
+        procCtrlTbl[pid].nJobs--;
+    }
+
+    // void jobQueue_pop_back(int pid, jobIdx_t jobIdx){
+
+  
+    // }
+
+    void static_job_assignment(){
+
+    }
+
+
+    void dynamic_job_assignment(){
+        PCB* pcbPtr;
+        int minNJob = 1 << 16, minNJobPid;
+        int maxNJob = 0, maxNJobPid;
+
+        for(int pid=1; pid<world_size; pid++){
+
+
+            if(minNJob > procCtrlTbl[pid].nJobs){
+                minNJob = procCtrlTbl[pid].nJobs;
+                minNJobPid = pid;
+            }
+
+            if(maxNJob < procCtrlTbl[pid].nJobs){
+                maxNJob = procCtrlTbl[pid].nJobs;
+                maxNJobPid = pid;
+            }
+        }
+
+        jobIdx_t jobIdx;
+        if(maxNJob - minNJob >= 2){
+            
+            jobIdx = procCtrlTbl[maxNJobPid].jobQueueBack->jobIdx;
+            unqueue_job(maxNJobPid, jobIdx);
+            enqueue_job(minNJobPid, jobIdx);
+
+            cancel_job(maxNJobPid, jobIdx);
+            assign_job(minNJobPid, jobIdx);
+            
+        }
+    }
+
+
+    void assign_job(){
+        // - update jobAssignTbl.
+        // - send job to target process.
+
+
+
+    }
 
     void send_terminate_signal(){
 
@@ -523,7 +630,9 @@ class ProcessManager{
     
     unsigned char *raw_image;
     unsigned char **image;
+
     PCB* procCtrlTbl;
+    unordered_map<jobIdx_t, JobNode *> jobNodeTbl;
 
 }    
 
