@@ -9,18 +9,22 @@
 #include <iostream>
 using namespace std;
 
-
-struct PCB{
-    int nJobs;
+struct JCB{
+    int i;
+    int j;
 };
 
 int main(int argc, char **argv) {
 
-    PCB* procCtrltble = new PCB[3];
 
-    procCtrltble[0].nJobs = 100;
+    JCB jcb;
+    int* ptr;
+    int a = 4;
 
-    printf("%d\n", procCtrltble[0].nJobs);
+    ptr = &(jcb.i);
+    // ptr = &a;
+    *ptr = 45;
+    printf("%d\n", jcb.i);
 
 	return 0;
 }

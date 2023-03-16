@@ -9,8 +9,9 @@
 #define GLM_FORCE_SWIZZLE  
 
 #define MPI_TAG_JOB_ASSIGN 0
-#define MPI_TAG_TERMINATE 1
-#define MPI_TAG_JOB_UPLOAD 2
+#define MPI_TAG_JOB_CANCEL 1
+#define MPI_TAG_TERMINATE 2
+#define MPI_TAG_JOB_UPLOAD 3
 
 
 #include <glm/glm.hpp>
@@ -208,7 +209,7 @@ class ThreadManager{
         target_pos = vec3(atof(argv[5]), atof(argv[6]), atof(argv[7]));
         width = atoi(argv[8]);
         height = atoi(argv[9]);
-        nTotalTsk = width * height;
+        nTotalJobs = width * height;
         // total_pixel = width * height;
     
     }
@@ -254,9 +255,8 @@ class ThreadManager{
     void job2task(int idx){
 
         Task tsk;
-       
-        tsk->i = idx / width;
-        tsk->j = idx % width;
+        jobIdx2ImgCoord(idx, &(tsk.i), &(tsk.j));
+
         for (int m = 0; m < AA; ++m) {
             tsk->m = m;
             for (int n = 0; n < AA; ++n) {
@@ -310,6 +310,8 @@ class ThreadManager{
                 jcb = jobCtrlTbl[tskKey];
                 jcb.n++;
                 jcb.result += tsk.result;
+                jcb.result /= (double)(AA * AA);
+                jcb.result *= 255.0;  
                 if(jcb.n == tmPtr->nTskPerJob){
                     jobCtrlTbl.erase(tskKey);
                     jobDoneQueue.push(jcb);
@@ -338,9 +340,6 @@ class ThreadManager{
         return tsk.i * ((int)width) + tsk.j; 
     }
 
-    // jobIdx_t jcb2Idx(JCB jcb){
-    //     return jcb.i * ((int)width) + jcb.j; 
-    // }
 
 
     void jobIdx2ImgCoord(int idx, int* i, int* j){
@@ -353,6 +352,8 @@ class ThreadManager{
     }
 
     void partial_AA(Task* tsk){
+
+        iResolution = vec2(width, height);
 
         int i = tsk->i; 
         int j = tsk->j; 
@@ -435,7 +436,7 @@ class ThreadManager{
     unsigned int height;  
     vec3 camera_pos; 
     vec3 target_pos; 
-    unsigned int nTotalTsk;
+    unsigned int nTotalJobs;
 
     unordered_map<taskKey_t, JCB> *jobCtrlTbl;
 
@@ -456,18 +457,18 @@ class ProcessManager{
         
         tmPtr = new ThreadManager(argv);
     
-        jobDoneBufSz = 256;
-        jobDoneBuf = new int[jobDoneBufSz];
-        worldSize = worldSize;
-        procCtrlTbl = new PCB[worldSize];
-
-
+    
         rank = rank;
         worldSize = worldSize;
-        nStaticJobs =  tmPtr->nTotalTsk / world_size; 
+        nStaticJobs =  tmPtr->nTotalJobs / world_size; 
         startIdx = nStaticJobs * rank;
         if(rank < world_size - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
-        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalTsk - 1;}
+        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalJobs - 1;}
+
+
+        jobDoneBufSz = 256;
+        jobDoneBuf = new int[jobDoneBufSz];
+        procCtrlTbl = new PCB[worldSize];
 
 
         raw_image = new unsigned char[tmPtr->width * tmPtr->height * 4];
@@ -476,7 +477,72 @@ class ProcessManager{
         for (int i = 0; i < tmPtr->height; ++i) {
             image[i] = raw_image + i * tmPtr->width * 4;
         }
-    
+
+        static_job_assignment();
+        start();
+    }
+
+
+
+    void static_job_assignment(){
+        // no real msg passing.
+
+        int s, e;
+
+        for(int pid=0; pid<world_size; pid++){
+            
+            s = nStaticJobs * pid;
+            if(pid < world_size - 1){e = nStaticJobs * (pid + 1) - 1;}
+            else if(pid == world_size - 1){e = tmPtr->nTotalJobs - 1;}
+            
+            for(int jobIdx = s; jobIdx <= e; jobIdx++){
+                enqueue_job(pid, jobIdx);
+            }
+        }
+    }
+
+
+    void start(){
+
+        tmPtr->start_thread();
+
+        int tskNum, jobNum;
+        for(int i = 0; i < (0.9 * nStaticJobs); i++){
+            tmPtr->one_task();                       
+        }
+
+        while(1){
+
+            receive_completed_jobs();
+
+            tmPtr->aggregate_tasks();
+            local_receive_completed_jobs();
+
+            dynamic_job_assignment();
+
+            check_send_terminate_signal();
+            tmPtr->one_task();
+
+        }  
+        tm->join_thread();  
+    }
+
+
+    void local_receive_completed_jobs(){
+
+        JCB jcb;
+        int ofst = 0, jobIdx; 
+
+        while(!tmPtr->jobDoneQueue.empty()){
+            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()]\
+                                                     pop failed.\n");}
+
+            image[jcb.i][4 * jcb.j + 0] = (unsigned char)jcb.result.r;  
+            image[jcb.i][4 * jcb.j + 1] = (unsigned char)jcb.result.g;  
+            image[jcb.i][4 * jcb.j + 2] = (unsigned char)jcb.result.b;  
+            image[jcb.i][4 * jcb.j + 3] = 255;  
+         
+        }
     }
 
 
@@ -513,6 +579,10 @@ class ProcessManager{
 
 
     void enqueue_job(int pid, jobIdx_t jobIdx){
+        // - Three things to update:
+        //      1. `jobNodeTbl`
+        //      2. job queue
+        //      3. `procCtrlTbl[pid].nJobs`
 
         JobNode *backPtr = procCtrlTbl[pid].jobQueueBack;
         
@@ -531,11 +601,16 @@ class ProcessManager{
         }
 
         jobNodeTbl[jobIdx] = curPtr;
+        procCtrlTbl[pid].nJobs++;
     }
 
 
 
     void unqueue_job(int pid, jobIdx_t jobIdx){
+        // - Three things to update:
+        //      1. `jobNodeTbl`
+        //      2. job queue
+        //      3. `procCtrlTbl[pid].nJobs`
 
         JobNode *curPtr = jobNodeTbl[jobIdx];
         JobNode *fNdPtr, *bNdPtr;
@@ -565,14 +640,6 @@ class ProcessManager{
         procCtrlTbl[pid].nJobs--;
     }
 
-    // void jobQueue_pop_back(int pid, jobIdx_t jobIdx){
-
-  
-    // }
-
-    void static_job_assignment(){
-
-    }
 
 
     void dynamic_job_assignment(){
@@ -580,7 +647,7 @@ class ProcessManager{
         int minNJob = 1 << 16, minNJobPid;
         int maxNJob = 0, maxNJobPid;
 
-        for(int pid=1; pid<world_size; pid++){
+        for(int pid=0; pid<world_size; pid++){
 
 
             if(minNJob > procCtrlTbl[pid].nJobs){
@@ -601,23 +668,32 @@ class ProcessManager{
             unqueue_job(maxNJobPid, jobIdx);
             enqueue_job(minNJobPid, jobIdx);
 
-            cancel_job(maxNJobPid, jobIdx);
-            assign_job(minNJobPid, jobIdx);
+            dynamic_cancel_job(maxNJobPid, jobIdx);
+            dynamic_assign_job(minNJobPid, jobIdx);
             
         }
     }
 
 
-    void assign_job(){
-        // - update jobAssignTbl.
-        // - send job to target process.
-
-
-
+    void dynamic_assign_job(int pid, jobIdx_t jobIdx){
+        MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD);        
     }
 
-    void send_terminate_signal(){
 
+    void dynamic_cancel_job(int pid, jobIdx_t jobIdx){
+        MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_CANCEL, MPI_COMM_WORLD);        
+    }
+
+
+    void check_send_terminate_signal(){
+        for(int pid = 1; pid < world_size; pid++){
+            if(procCtrlTbl[pid].nJobs) return;
+        }
+
+        int sigBuf = 1;
+        for(int pid = 1; pid < world_size; pid++){
+            MPI_Send(&sigBuf, 1, MPI_INT, pid, MPI_TAG_TERMINATE, MPI_COMM_WORLD);
+        }
     }
 
 
@@ -655,13 +731,12 @@ class Process{
           
         rank = rank;
         worldSize = worldSize;
-        nStaticJobs =  tmPtr->nTotalTsk / world_size; 
+        nStaticJobs =  tmPtr->nTotalJobs / world_size; 
         startIdx = nStaticJobs * rank;
         if(rank < world_size - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
-        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalTsk - 1;}
+        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalJobs - 1;}
 
         static_job2task();
-        tmPtr->start_thread();
         start();
     }
 
@@ -669,8 +744,9 @@ class Process{
 
     void start(){
 
-        int tskNum, jobNum;
+        tmPtr->start_thread();
 
+        int tskNum;
         for(int i = 0; i < (0.9 * nStaticJobs); i++){
             tmPtr->one_task();                       
         }
@@ -680,15 +756,9 @@ class Process{
             tmPtr->aggregate_tasks();
             upload_completed_jobs();
 
-            check_job_assignment(&jobNum);
-            tskNum = tmPtr->get_task_num();
+            check_enqueue_job_assignment(&jobNum);
+            check_receive_terminate_signal();
 
-            if(tskNum == 0){
-                while(jobNum == 0){
-                    check_termination();
-                    check_job_assignment(&jobNum);
-                }
-            }
             tmPtr->one_task();
         }  
         tm->join_thread();  
@@ -706,7 +776,7 @@ class Process{
 
 
 
-    void check_termination(){
+    void check_receive_terminate_signal(){
 
         int flag, recvSz, terminate = 0;
         MPI_Status status;
@@ -716,14 +786,14 @@ class Process{
 
         MPI_Get_count(&status, MPI_INT, &recvSz);
         if(recvSz != 1){
-            fprintf(stderr, "\n[check_termination()] recvSz != 1.\n\n");
+            fprintf(stderr, "\n[check_receive_terminate_signal()] recvSz != 1.\n\n");
             exit(1);
         }
 
 		MPI_Recv(&terminate, recvSz, MPI_INT, 0, MPI_TAG_TERMINATE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         if(terminate){
-            fprintf(stderr, "\n[check_termination()][proc %d] receive\
+            fprintf(stderr, "\n[check_receive_terminate_signal()][proc %d] receive\
                                          terminate signal. Terminating...\n\n", rank);
             exit(0);
         }
@@ -731,23 +801,23 @@ class Process{
 
     
 
-    void check_job_assignment(int* recvSz){
-        int flag;
+    void check_enqueue_job_assignment(){
+        int flag, recvSz;
         MPI_Status status;
         
         MPI_Iprobe(0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, &flag, &status);
         if(!flag){return;}        
 
-        MPI_Get_count(&status, MPI_INT, recvSz);
+        MPI_Get_count(&status, MPI_INT, &recvSz);
         if(recvSz > jobBufSz){
             fprintf(stderr, "\n[check_job_assignment()][proc %d] recvSz > jobBufSz.\
                                                          Terminating...\n\n", rank);
             exit(1);            
         }
 
-		MPI_Recv(jobBuf, *recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		MPI_Recv(jobBuf, recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
-        for(int i = 0; i < *recvSz; i++){
+        for(int i = 0; i < recvSz; i++){
             tmPtr->job2task(jobBuf[i]);
         }
     }
@@ -808,113 +878,11 @@ int main(int argc, char** argv) {
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     if(rank == 0){
-        
-        // ProcessManager pm(argv, rank, world_size);
-        // Process proc(argv, rank, world_size);
-
+        ProcessManager pm(argv, rank, world_size);
     }
     else{
         Process proc(argv, rank, world_size);
     }
-
-
-
-
-
-
-
-
-    //###############################################
-
-
-
-
-    ThreadManager tm(argv, rank, world_size);
-    if(rank == 0){
-        ProcessManager pm(argv, rank, world_size);
-    }
-
-
-    tm.job2task();
-    tm.start_thread();
-    
-    bool hasTask;
-    while(1){
-
-        hasTask = tm.one_task();
-        if(!hasTask) return;
-        tm.aggregate_tasks();
-
-        if(rank == 0){
-            pm.dynamic_scheduling();
-            pm.aggregate_jobs();
-        }
-                      
-    }
-    
-    if(rank == 0){
-        pm.aggregate_jobs();
-    }
-
-
-    tm.join_thread(); 
-
-
-
-
-    // num_threads = atoi(argv[1]);
-    // camera_pos = vec3(atof(argv[2]), atof(argv[3]), atof(argv[4]));
-    // target_pos = vec3(atof(argv[5]), atof(argv[6]), atof(argv[7]));
-    // width = atoi(argv[8]);
-    // height = atoi(argv[9]);
-
-
-    // double total_pixel = width * height;
-    // double current_pixel = 0;
-
-
-
-
-    iResolution = vec2(width, height);
-
-    raw_image = new unsigned char[width * height * 4];
-    image = new unsigned char*[height];
-
-    for (int i = 0; i < height; ++i) {
-        image[i] = raw_image + i * width * 4;
-    }
- 
-
-
-
-    for (int i = 0; i < height; ++i) {
-        for (int j = 0; j < width; ++j) {
-
-            vec4 fcol(0.), partial_fcol(0.);  
-
-            for (int m = 0; m < AA; ++m) {
-                for (int n = 0; n < AA; ++n) {
-
-                    partial_AA(i, j, m, n, &partial_fcol);
-
-                    fcol += partial_fcol;
-                }
-            }
-
-            fcol /= (double)(AA * AA);
-            fcol *= 255.0;
-
-            image[i][4 * j + 0] = (unsigned char)fcol.r;  
-            image[i][4 * j + 1] = (unsigned char)fcol.g;  
-            image[i][4 * j + 2] = (unsigned char)fcol.b;  
-            image[i][4 * j + 3] = 255;                    
-
-            // current_pixel++;
-            // printf("rendering...%5.2lf%%\r", current_pixel / total_pixel * 100.);
-        }
-    }
-
-
 
 
     write_png(argv[10]);
