@@ -10,6 +10,8 @@
 
 #define MPI_TAG_JOB_ASSIGN 0
 #define MPI_TAG_TERMINATE 1
+#define MPI_TAG_JOB_UPLOAD 2
+
 
 #include <glm/glm.hpp>
 
@@ -160,6 +162,8 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 
 typedef int taskId_t;
 typedef int taskKey_t;
+typedef int jobIdx_t;
+
 
 struct Task{
     int i;
@@ -169,14 +173,13 @@ struct Task{
     vec4 result;
 };
 
-struct Job{
+
+struct JCB{
     int i;
-    int j;   
-    vec4 result; 
+    int j;     
+    vec4 result;
+    int n;
 }
-
-
-
 
 
 
@@ -258,7 +261,7 @@ class ThreadManager{
                 if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
 
                 partial_AA(&tsk);
-                doneQueue.push(tsk);
+                tskDoneQueue.push(tsk);
             }
         }
     }
@@ -272,7 +275,7 @@ class ThreadManager{
             if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
 
             partial_AA(&tsk);
-            doneQueue.push(tsk);
+            tskDoneQueue.push(tsk);
         }
  
     }
@@ -280,11 +283,46 @@ class ThreadManager{
 
     void aggregate_tasks(){
         
+        Task tsk;
+        JCB jcb;
+        taskKey_t tskKey;
+        while(!tskDoneQueue.empty()){
+            if(!tskDoneQueue.try_pop(tsk)){fprintf(stderr, "[aggregate_tasks()] pop failed.\n");}
+
+            tskKey = tsk2key(tsk);
+            if(is_in_jobCtrlTbl(tskKey)){
+                jcb = jobCtrlTbl[tskKey];
+                jcb.n++;
+                jcb.result += tsk.result;
+                if(jcb.n == tmPtr->nTskPerJob){
+                    jobCtrlTbl.erase(tskKey);
+                    jobDoneQueue.push(jcb);
+                }
+                else{
+                    jobCtrlTbl[tskKey] = jcb;
+                }
+            }
+            else{
+                jcb.i = tsk.i;
+                jcb.j = tsk.j;
+                jcb.n = 1;
+                jcb.result = tsk.result;
+                jobCtrlTbl[tskKey] = jcb;
+            }
+    }
+
+
+    bool is_in_jobCtrlTbl(taskKey_t tskKey){
+        return !(jobCtrlTbl->find(tskKey) == jobCtrlTbl->end());
     }
 
 
     taskKey_t tsk2key(Task tsk){
         return tsk.i * ((int)width) + tsk.j; 
+    }
+
+    jobIdx_t jcb2Idx(JCB jcb){
+        return jcb.i * ((int)width) + jcb.j; 
     }
 
     void partial_AA(Task* tsk){
@@ -358,7 +396,8 @@ class ThreadManager{
 
 
     concurrent_queue<Task> tskQueue;
-    concurrent_queue<Task> doneQueue;
+    concurrent_queue<Task> tskDoneQueue;
+    concurrent_queue<JCB> jobDoneQueue;
 
 
     unsigned int nTskThrds;
@@ -371,6 +410,7 @@ class ThreadManager{
     vec3 target_pos; 
     double total_pixel;
 
+    unordered_map<taskKey_t, JCB> *jobCtrlTbl;
 
     struct entryArg{
         ThreadManager* objPtr;
@@ -405,6 +445,11 @@ class Process{
 
         jobBufSz = 256;
         jobBuf = new int[jobBufSz];
+
+        jobDoneBufSz = 256;
+        jobDoneBuf = new int[jobDoneBufSz];
+          
+
 
         rank = rank;
         worldSize = worldSize;
@@ -501,6 +546,7 @@ class Process{
                                                          Terminating...\n\n", rank);
             exit(1);            
         }
+
 		MPI_Recv(jobBuf, *recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         for(int i = 0; i < *recvSz; i++){
@@ -512,64 +558,35 @@ class Process{
 
     
     void upload_completed_job(){
-        
-        
-        Task tsk;
+
         JCB jcb;
-        taskKey_t tskKey;
-        while(!tmPtr->doneQueue.empty()){
-            if(!tmPtr->doneQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
+        int ofst = 0, tskKey; 
 
-            tskKey = tmPtr->tsk2key(tsk);
-            if(is_in_jobCtrlTbl(tskKey)){
-                jcb = jobCtrlTbl[tskKey];
-                jcb.n++;
-                jcb.result +=tsk.result;
-                if(jcb.n == tmPtr->nTskPerJob){
-                    jobCtrlTbl.erase(tskKey);
-                }
-                else{
-                    jobCtrlTbl[tskKey] = jcb;
-                }
-            }
-            else{
-                jcb.n = 1;
-                jcb.result = tsk.result;
-                jobCtrlTbl[tskKey] = jcb;
-            }
-            
+        while(!tmPtr->jobDoneQueue.empty()){
+            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_job()] pop failed.\n");}
 
-            if(!is_in_jobCtrlTbl(tskKey)){
-                int buf[2];
+            tskKey = jcb2Idx(jcb);
+            jobDoneBuf[ofst++] = tskKey;
+            jobDoneBuf[ofst++] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
+                (((int)jcb.result.b) << 8) | ((int)255);       
 
-                buf[0] = tskKey;
-                buf[1] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
-                    (((int)jcb.result.b) << 8) | ((int)255);
-                
-        
-                
-                MPI_Send(&buf, 1, MPI_INT, 0, STATUS_IDLE, MPI_COMM_WORLD);
-            }
-            
-        }        
+            if(ofst >= jobDoneBufSz)break;
+        }
 
-        
+        MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
     }
 
-    bool is_in_jobCtrlTbl(taskKey_t tskKey){
-        return !(jobCtrlTbl->find(tskKey) == jobCtrlTbl->end());
-    }
 
-    struct JCB{
-        vec4 result;
-        int n;
-    }
 
-    unordered_map<taskKey_t, JCB> *jobCtrlTbl;
+
+
+
 
     ThreadManager *tmPtr;
     int *jobBuf;
     int jobBufSz;    
+    int *jobDoneBuf;
+    int jobDoneBufSz;   
 
     int rank, worldSize;
     int startIdx, stopIdx, nJobs;    
