@@ -13,7 +13,7 @@ echo "==================================="
 
 if [ -f "$FILE" ]; then
     # srun -N 3 -n 4 -c 3 ./lab2 500000000 100 2> run-stderr.out 
-    srun -N 1 -n 1 -c 1 ${FILE} 2> run-stderr.out 
+    srun -N 1 -n 4 -c 1 ${FILE} 2> run-stderr.out 
 else
     echo "" > run-stderr.out
 fi

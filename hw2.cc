@@ -193,7 +193,8 @@ class ThreadManager{
         target_pos = vec3(atof(argv[5]), atof(argv[6]), atof(argv[7]));
         width = atoi(argv[8]);
         height = atoi(argv[9]);
-        total_pixel = width * height;
+        nTotalTsk = width * height;
+        // total_pixel = width * height;
     
     }
 
@@ -309,6 +310,7 @@ class ThreadManager{
                 jcb.result = tsk.result;
                 jobCtrlTbl[tskKey] = jcb;
             }
+        }
     }
 
 
@@ -408,7 +410,7 @@ class ThreadManager{
     unsigned int height;  
     vec3 camera_pos; 
     vec3 target_pos; 
-    double total_pixel;
+    unsigned int nTotalTsk;
 
     unordered_map<taskKey_t, JCB> *jobCtrlTbl;
 
@@ -422,20 +424,57 @@ class ThreadManager{
 
 
 
-// only rank 0 proc use it.
 class ProcessManager{ 
     public:
     
-    ProcessManager(){
+    ProcessManager(char** argv, int rank, int worldSize){
         
+        jobDoneBufSz = 256;
+        jobDoneBuf = new int[jobDoneBufSz];
+        worldSize = worldSize;
+          
     }
+
+
+    void receive_completed_jobs(){
+
+        int flag, recvSz;
+        MPI_Status status;
+        
+        for(int i=1; i<world_size; i++){
+            MPI_Iprobe(i, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD, &flag, &status);
+            if(!flag){return;}        
+
+            MPI_Get_count(&status, MPI_INT, &recvSz);
+            MPI_Recv(jobDoneBuf, *recvSz, MPI_INT, i, MPI_TAG_JOB_UPLOAD,
+                                                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+  
+    }
+
+
+    void dynamic_job_assignment(){
+
+    }
+
+
+    void send_terminate_signal(){
+
+    }
+
+
+
+    int *jobDoneBuf;
+    int jobDoneBufSz; 
+
+    int worldSize;
 
 }    
 
 
 
 
-// only rank 0 proc use it.
+
 class Process{ 
     public:
     
@@ -449,15 +488,12 @@ class Process{
         jobDoneBufSz = 256;
         jobDoneBuf = new int[jobDoneBufSz];
           
-
-
         rank = rank;
         worldSize = worldSize;
-        nJobs =  tmPtr->total_pixel / world_size; 
-        startIdx = nJobs * rank;
-        if(rank < world_size - 1){stopIdx = nJobs * (rank + 1) - 1;}
-        else if(rank == world_size - 1){stopIdx = total_pixel - 1;}
-
+        nStaticJobs =  tmPtr->nTotalTsk / world_size; 
+        startIdx = nStaticJobs * rank;
+        if(rank < world_size - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
+        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalTsk - 1;}
 
         static_job2task();
         tmPtr->start_thread();
@@ -465,18 +501,20 @@ class Process{
     }
 
 
+
     void start(){
 
         int tskNum, jobNum;
 
+        for(int i = 0; i < (0.9 * nStaticJobs); i++){
+            tmPtr->one_task();                       
+        }
+
         while(1){
 
-            for(int i=0; i<3; i++){
-                tmPtr->one_task();
-                tmPtr->aggregate_tasks();                   
-            }
+            tmPtr->aggregate_tasks();
+            upload_completed_jobs();
 
-            upload_completed_job();
             check_job_assignment(&jobNum);
             tskNum = tmPtr->get_task_num();
 
@@ -486,9 +524,8 @@ class Process{
                     check_job_assignment(&jobNum);
                 }
             }
-
+            tmPtr->one_task();
         }  
-
         tm->join_thread();  
     }
 
@@ -518,7 +555,6 @@ class Process{
             exit(1);
         }
 
-
 		MPI_Recv(&terminate, recvSz, MPI_INT, 0, MPI_TAG_TERMINATE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         if(terminate){
@@ -526,14 +562,11 @@ class Process{
                                          terminate signal. Terminating...\n\n", rank);
             exit(0);
         }
-
     }
+
     
 
     void check_job_assignment(int* recvSz){
-        // - check incoming msg
-        // - if is any msg, receive it and return true
-
         int flag;
         MPI_Status status;
         
@@ -552,18 +585,16 @@ class Process{
         for(int i = 0; i < *recvSz; i++){
             tmPtr->job2task(jobBuf[i]);
         }
-
-
     }
 
-    
-    void upload_completed_job(){
+
+    void upload_completed_jobs(){
 
         JCB jcb;
         int ofst = 0, tskKey; 
 
         while(!tmPtr->jobDoneQueue.empty()){
-            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_job()] pop failed.\n");}
+            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
 
             tskKey = jcb2Idx(jcb);
             jobDoneBuf[ofst++] = tskKey;
@@ -573,11 +604,8 @@ class Process{
             if(ofst >= jobDoneBufSz)break;
         }
 
-        MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
+        if(ofst > 0) MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
     }
-
-
-
 
 
 
@@ -589,7 +617,7 @@ class Process{
     int jobDoneBufSz;   
 
     int rank, worldSize;
-    int startIdx, stopIdx, nJobs;    
+    int startIdx, stopIdx, nStaticJobs;    
     
 }    
 
@@ -599,43 +627,6 @@ class Process{
 
 
 
-
-
-void start_process(char** argv, int rank, int worldSize){
-
-    Process proc(argv, rank, world_size);
-
-    // ThreadManager tm(argv, rank, world_size);
-    // if(rank == 0){
-    //     ProcessManager pm(argv, rank, world_size);
-    // }
-
-
-    // tm.job2task();
-    // tm.start_thread();
-    
-    // bool hasTask;
-    // while(1){
-
-    //     hasTask = tm.one_task();
-    //     if(!hasTask) return;
-    //     tm.aggregate_tasks();
-
-    //     if(rank == 0){
-    //         pm.dynamic_scheduling();
-    //         pm.aggregate_jobs();
-    //     }
-                      
-    // }
-    
-    // if(rank == 0){
-    //     pm.aggregate_jobs();
-    // }
-
-
-    // tm.join_thread(); 
-
-}
 
 
 
@@ -651,11 +642,17 @@ int main(int argc, char** argv) {
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
     if(rank == 0){
-        start_process_manager(argv, rank, world_size);
+        
+        // ProcessManager pm(argv, rank, world_size);
+        // Process proc(argv, rank, world_size);
+
     }
     else{
-        start_process(argv, rank, world_size);
+        Process proc(argv, rank, world_size);
     }
+
+
+
 
 
 
