@@ -159,7 +159,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 
 
 typedef int taskId_t;
-
+typedef int taskKey_t;
 
 struct Task{
     int i;
@@ -174,6 +174,10 @@ struct Job{
     int j;   
     vec4 result; 
 }
+
+
+
+
 
 
 class ThreadManager{
@@ -275,12 +279,12 @@ class ThreadManager{
 
 
     void aggregate_tasks(){
-
+        
     }
 
 
-    void aggregate_jobs(){
-
+    taskKey_t tsk2key(Task tsk){
+        return tsk.i * ((int)width) + tsk.j; 
     }
 
     void partial_AA(Task* tsk){
@@ -399,6 +403,9 @@ class Process{
 
         tmPtr = new ThreadManager(argv);
 
+        jobBufSz = 256;
+        jobBuf = new int[jobBufSz];
+
         rank = rank;
         worldSize = worldSize;
         nJobs =  tmPtr->total_pixel / world_size; 
@@ -451,6 +458,7 @@ class Process{
     }
 
 
+
     void check_termination(){
 
         int flag, recvSz, terminate = 0;
@@ -469,12 +477,11 @@ class Process{
 		MPI_Recv(&terminate, recvSz, MPI_INT, 0, MPI_TAG_TERMINATE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         if(terminate){
-            fprintf(stderr, "\n[check_termination()][proc %d ] receive\
+            fprintf(stderr, "\n[check_termination()][proc %d] receive\
                                          terminate signal. Terminating...\n\n", rank);
             exit(0);
         }
 
-        
     }
     
 
@@ -489,6 +496,11 @@ class Process{
         if(!flag){return;}        
 
         MPI_Get_count(&status, MPI_INT, recvSz);
+        if(recvSz > jobBufSz){
+            fprintf(stderr, "\n[check_job_assignment()][proc %d] recvSz > jobBufSz.\
+                                                         Terminating...\n\n", rank);
+            exit(1);            
+        }
 		MPI_Recv(jobBuf, *recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         
         for(int i = 0; i < *recvSz; i++){
@@ -499,16 +511,69 @@ class Process{
     }
 
     
-    void send_completed_job(){
+    void upload_completed_job(){
+        
+        
+        Task tsk;
+        JCB jcb;
+        taskKey_t tskKey;
+        while(!tmPtr->doneQueue.empty()){
+            if(!tmPtr->doneQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
 
+            tskKey = tmPtr->tsk2key(tsk);
+            if(is_in_jobCtrlTbl(tskKey)){
+                jcb = jobCtrlTbl[tskKey];
+                jcb.n++;
+                jcb.result +=tsk.result;
+                if(jcb.n == tmPtr->nTskPerJob){
+                    jobCtrlTbl.erase(tskKey);
+                }
+                else{
+                    jobCtrlTbl[tskKey] = jcb;
+                }
+            }
+            else{
+                jcb.n = 1;
+                jcb.result = tsk.result;
+                jobCtrlTbl[tskKey] = jcb;
+            }
+            
+
+            if(!is_in_jobCtrlTbl(tskKey)){
+                int buf[2];
+
+                buf[0] = tskKey;
+                buf[1] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
+                    (((int)jcb.result.b) << 8) | ((int)255);
+                
+        
+                
+                MPI_Send(&buf, 1, MPI_INT, 0, STATUS_IDLE, MPI_COMM_WORLD);
+            }
+            
+        }        
+
+        
     }
 
+    bool is_in_jobCtrlTbl(taskKey_t tskKey){
+        return !(jobCtrlTbl->find(tskKey) == jobCtrlTbl->end());
+    }
 
+    struct JCB{
+        vec4 result;
+        int n;
+    }
 
-    ThreadManager* tmPtr;
+    unordered_map<taskKey_t, JCB> *jobCtrlTbl;
+
+    ThreadManager *tmPtr;
+    int *jobBuf;
+    int jobBufSz;    
 
     int rank, worldSize;
     int startIdx, stopIdx, nJobs;    
+    
 }    
 
 
