@@ -1,0 +1,9 @@
+N=3
+n=7
+c=1
+pos=-0.6933948394011069 -0.04541203461339527 -0.5743323568075049
+tarpos=0 0 0
+width=304
+height=334
+timelimit=360
+valid=/home/ipc22/share/hw2/testcases/hidden/06.png
