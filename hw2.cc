@@ -182,6 +182,11 @@ struct JCB{
 }
 
 
+struct PCB{
+    int nJobs;
+}
+
+
 
 class ThreadManager{
     public:
@@ -323,8 +328,18 @@ class ThreadManager{
         return tsk.i * ((int)width) + tsk.j; 
     }
 
-    jobIdx_t jcb2Idx(JCB jcb){
-        return jcb.i * ((int)width) + jcb.j; 
+    // jobIdx_t jcb2Idx(JCB jcb){
+    //     return jcb.i * ((int)width) + jcb.j; 
+    // }
+
+
+    void jobIdx2ImgCoord(int idx, int* i, int* j){
+        *i = idx / width;
+        *j = idx % width;        
+    }
+
+    void imgCoord2JobIdx(int i, int j, int* idx){
+        *idx = i * ((int)width) + j;      
     }
 
     void partial_AA(Task* tsk){
@@ -429,32 +444,68 @@ class ProcessManager{
     
     ProcessManager(char** argv, int rank, int worldSize){
         
+        tmPtr = new ThreadManager(argv);
+    
         jobDoneBufSz = 256;
         jobDoneBuf = new int[jobDoneBufSz];
         worldSize = worldSize;
-          
+        procCtrlTbl = new PCB[worldSize];
+
+
+        rank = rank;
+        worldSize = worldSize;
+        nStaticJobs =  tmPtr->nTotalTsk / world_size; 
+        startIdx = nStaticJobs * rank;
+        if(rank < world_size - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
+        else if(rank == world_size - 1){stopIdx = tmPtr->nTotalTsk - 1;}
+
+
+        raw_image = new unsigned char[tmPtr->width * tmPtr->height * 4];
+        image = new unsigned char*[tmPtr->height];
+
+        for (int i = 0; i < tmPtr->height; ++i) {
+            image[i] = raw_image + i * tmPtr->width * 4;
+        }
+    
     }
 
 
     void receive_completed_jobs(){
 
-        int flag, recvSz;
+        int flag, recvSz, i, j, data;
+        int dataMask = (1 << 8) - 1;
+        PCB* pcbPtr;
         MPI_Status status;
         
-        for(int i=1; i<world_size; i++){
-            MPI_Iprobe(i, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD, &flag, &status);
+        for(int pid=1; pid<world_size; pid++){
+            MPI_Iprobe(pid, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD, &flag, &status);
             if(!flag){return;}        
 
             MPI_Get_count(&status, MPI_INT, &recvSz);
-            MPI_Recv(jobDoneBuf, *recvSz, MPI_INT, i, MPI_TAG_JOB_UPLOAD,
+            MPI_Recv(jobDoneBuf, *recvSz, MPI_INT, pid, MPI_TAG_JOB_UPLOAD,
                                                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            for(int k = 0; k < recvSz; k += 2){
+
+                tmPtr->jobIdx2ImgCoord(jobDoneBuf[k], &i, &j);
+                data = jobDoneBuf[k+1];
+
+                image[i][4 * j + 0] = (unsigned char)((data >> 24) |  dataMask);  
+                image[i][4 * j + 1] = (unsigned char)((data >> 16) |  dataMask);  
+                image[i][4 * j + 2] = (unsigned char)((data >> 8 ) |  dataMask);  
+                image[i][4 * j + 3] = 255;  
+
+                pcbPtr = &procCtrlTbl[pid];
+                pcbPtr->nJobs--;
+
+            }
         }
-  
     }
 
 
     void dynamic_job_assignment(){
-
+        PCB* pcbPtr;
+        
     }
 
 
@@ -467,7 +518,12 @@ class ProcessManager{
     int *jobDoneBuf;
     int jobDoneBufSz; 
 
-    int worldSize;
+    int rank, worldSize;
+    int startIdx, stopIdx, nStaticJobs; 
+    
+    unsigned char *raw_image;
+    unsigned char **image;
+    PCB* procCtrlTbl;
 
 }    
 
@@ -591,13 +647,14 @@ class Process{
     void upload_completed_jobs(){
 
         JCB jcb;
-        int ofst = 0, tskKey; 
+        int ofst = 0, jobIdx; 
 
         while(!tmPtr->jobDoneQueue.empty()){
             if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
 
-            tskKey = jcb2Idx(jcb);
-            jobDoneBuf[ofst++] = tskKey;
+            tmPtr->imgCoord2JobIdx(jcb.i, jcb.j, &jobIdx);
+
+            jobDoneBuf[ofst++] = jobIdx;
             jobDoneBuf[ofst++] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
                 (((int)jcb.result.b) << 8) | ((int)255);       
 
