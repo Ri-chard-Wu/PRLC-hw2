@@ -8,20 +8,9 @@ cd ~/hw2/
 make clean; make 2> make-stderr.out
 RunFile=./hw2
 
-source ./testcases/06.txt
+source ./testcases/04.txt
 
 
-# N=2
-# n=4
-# c=3
-# x1=-0.522
-# y1=2.874
-# z1=1.340
-# x2=0.0
-# y2=0.0
-# z2=0.0
-# width=64
-# height=64
 
 num_threads=${c}
 outFile=out.png

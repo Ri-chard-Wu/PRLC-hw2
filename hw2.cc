@@ -13,6 +13,7 @@
 #include "tbb/concurrent_queue.h"
 #include <unordered_map>
 #include <queue>
+
 using namespace std;
 using namespace oneapi::tbb;
 
@@ -141,7 +142,8 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_JOB_CANCEL 1
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
-#define BUF_SIZE 65536
+#define BUF_SIZE_JOB_UPLOAD 1500
+#define BUF_SIZE_JOB_ASSIGN 1000
 
 typedef int jobIdx_t;
 
@@ -192,7 +194,10 @@ class ThreadManager{
         width = atoi(argv[8]);
         height = atoi(argv[9]);
         nTotalJobs = width * height;
-        nTskPerJob = AA * AA;    
+        nTskPerJob = AA * AA;  
+
+
+        
     }
 
 
@@ -230,6 +235,8 @@ class ThreadManager{
         for (int i = 0; i < nTskThrds; i++){
             pthread_join(tskThrds[i], NULL);
         }  
+
+        fprintf(stdout, "[proc %d][join_thread()] all threads joined.\n", rank);
     }
 
 
@@ -255,14 +262,25 @@ class ThreadManager{
 
         Task tsk;
 
-        while(1){
-            if(!tskQueue.empty()){
-                if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
 
-                partial_AA(&tsk);
-                tskDoneQueue.push(tsk);
-            }
+        while(!tskQueue.empty()){
+            
+            if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
+
+            partial_AA(&tsk);
+            tskDoneQueue.push(tsk);
+           
         }
+
+
+        // while(1){
+        //     if(!tskQueue.empty()){
+        //         if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
+
+        //         partial_AA(&tsk);
+        //         tskDoneQueue.push(tsk);
+        //     }
+        // }
     }
 
 
@@ -524,48 +542,61 @@ class ProcessManager{
         tmPtr->start_thread();
 
 
-        while(1){
-            tmPtr->one_task();   
-
-            // fprintf(stderr, "[proc %d][start()] tskqueue size: %d\n", rank, tmPtr->tskQueue.unsafe_size());
-            if(0.1 * nStaticJobs > tmPtr->tskQueue.unsafe_size())break;
-        }
 
 
-        while(1){
+
+        int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
+
+        while(tmPtr->tskQueue.unsafe_size() > 0.1 * nStaticTsks){
+     
+            for(int i=0;i<1;i++){
+                tmPtr->one_task();                 
+            }
             
-            // fprintf(stderr, "[start()] a\n");
+            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
+
+                tmPtr->aggregate_tasks();
+
+                while(tmPtr->jobDoneQueue.unsafe_size() >= 0.1 * nStaticJobs){
+                    local_receive_completed_jobs();
+                } 
+            }
 
             receive_completed_jobs();
-            
-            // fprintf(stderr, "[start()] b\n");
-
-            tmPtr->aggregate_tasks();
-
-            // fprintf(stderr, "[start()] c\n");
-
-            local_receive_completed_jobs();
-
-            // fprintf(stderr, "[start()] d\n");
-
-            // dynamic_job_assignment(); // has problem.
-
-            if(check_send_terminate_signal()) break;
-            tmPtr->one_task();
-
         }  
 
+
+        while(!tmPtr->tskQueue.empty()){
+            tmPtr->one_task();   
+        }
+
+        tmPtr->join_thread(); 
+        tmPtr->aggregate_tasks();
+        local_receive_completed_jobs();
+
+
+        while(!check_send_terminate_signal()){
+            receive_completed_jobs();
+        }  
+
+        fprintf(stderr, "[proc 0][start] a\n");
+        MPI_Finalize();
+        fprintf(stderr, "[proc 0][start] b\n");
+
+
     }
+
+
 
 
     void print_proc_nJob(){
         
         for(int pid=0; pid<worldSize; pid++){
             
-            fprintf(stderr, "%d, ", procCtrlTbl[pid].nJobs);
+            fprintf(stdout, "%d, ", procCtrlTbl[pid].nJobs);
         }
 
-        fprintf(stderr, "\n");
+        fprintf(stdout, "\n");
 
     }
 
@@ -585,7 +616,7 @@ class ProcessManager{
             image[jcb.i][4 * jcb.j + 0] = (unsigned char)jcb.result.r;  
             image[jcb.i][4 * jcb.j + 1] = (unsigned char)jcb.result.g;  
             image[jcb.i][4 * jcb.j + 2] = (unsigned char)jcb.result.b;  
-            image[jcb.i][4 * jcb.j + 3] = 255;  
+            image[jcb.i][4 * jcb.j + 3] = (unsigned char)255;  
 
             unqueue_job(0, jobIdx);
             ofst++;
@@ -594,6 +625,8 @@ class ProcessManager{
         
         if(ofst > 0){
             // fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n", rank, ofst);  
+            fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
+            rank, ofst);             
         }
         
 
@@ -607,8 +640,11 @@ class ProcessManager{
         int dataMask = (1 << 8) - 1;
         PCB* pcbPtr;
         MPI_Status status;
-
+        
+        
         for(int pid=1; pid<worldSize; pid++){
+
+
             MPI_Iprobe(pid, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD, &flag, &status);
             if(!flag){continue;}        
 
@@ -617,30 +653,19 @@ class ProcessManager{
                                                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
             recvCnt[pid] += recvSz;
-
-            if(recvCnt[pid] >= nStaticJobs*0.8){
-                fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
-                rank, pid, recvCnt[pid]);    
-            }
-        
-
+            
+            fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
+            rank, pid, recvCnt[pid]/2); 
 
             for(int k = 0; k < recvSz; k += 2){
                 jobIdx = jobDoneBuf[k];
                 tmPtr->jobIdx2ImgCoord(jobIdx, &i, &j);
                 data = jobDoneBuf[k+1];
 
-                // fprintf(stderr, "[proc %d][receive_completed_jobs()] \
-                // k: %d, jobIdx: %d, i: %d, j: %d, data: %d, \n", rank, k, jobIdx, i, j, data);
-
                 image[i][4 * j + 0] = (unsigned char)((data >> 24) &  dataMask);  
                 image[i][4 * j + 1] = (unsigned char)((data >> 16) &  dataMask);  
                 image[i][4 * j + 2] = (unsigned char)((data >> 8 ) &  dataMask);  
-                image[i][4 * j + 3] = 255;  
-
-                // fprintf(stderr, "[receive_completed_jobs()] \
-                // r: %d, g: %d, b: %d, data: %d, dataMask: %d\n", image[i][4 * j + 0], 
-                // image[i][4 * j + 1], image[i][4 * j + 2], data, dataMask);
+                image[i][4 * j + 3] = (unsigned char)255;  
 
                 if(jobIdx < 0 || jobIdx >= (tmPtr->nTotalJobs)){
                     fprintf(stderr, "[proc %d][receive_completed_jobs()] job idx out of range.\n", rank);            
@@ -799,6 +824,9 @@ class ProcessManager{
 
 
     bool check_send_terminate_signal(){
+
+        // print_proc_nJob();
+
         for(int pid = 1; pid < worldSize; pid++){
             if(procCtrlTbl[pid].nJobs) return false;
         }
@@ -811,16 +839,26 @@ class ProcessManager{
     }
 
 
-    void write_png(){
-        unsigned error = lodepng_encode32_file(filename, raw_image, tmPtr->width, tmPtr->height);
-        if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
-    }
+    // void write_png(){
+
+    //     fprintf(stdout, "[proc %d][write_png()] a\n", rank);
+
+    //     fprintf(stdout, "[proc %d][write_png()] width: %d, height: %d\n", rank, tmPtr->width, tmPtr->height);
+
+    //     unsigned error = lodepng_encode32_file(filename, raw_image, tmPtr->width, tmPtr->height);
+
+    //     fprintf(stdout, "[proc %d][write_png()] b\n", rank);
+
+    //     if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
+
+    //     fprintf(stdout, "[proc %d][write_png()] c\n", rank);
+    // }
 
 
     ThreadManager *tmPtr;
     
-    int jobDoneBuf[BUF_SIZE];
-    int jobDoneBufSz = BUF_SIZE;
+    int jobDoneBuf[BUF_SIZE_JOB_UPLOAD];
+    int jobDoneBufSz = BUF_SIZE_JOB_UPLOAD;
 
     int rank, worldSize;
     int startIdx, stopIdx, nStaticJobs; 
@@ -848,11 +886,6 @@ class Process{
 
         tmPtr = new ThreadManager(argv, rank, worldSize);
 
-        jobBufSz = BUF_SIZE;
-        jobBuf = new int[jobBufSz];
-
-        // jobDoneBufSz = BUF_SIZE;
-        // jobDoneBuf = new int[jobDoneBufSz];
           
         this->rank = rank;
         this->worldSize = worldSize;
@@ -867,44 +900,66 @@ class Process{
     }
 
 
-
-    void start_process(){
-
-   
-        tmPtr->start_thread();
-
-
-        // while(1){
-        //     tmPtr->one_task();  
-           
-
-        //     // fprintf(stderr, "[proc %d][start()] tsk queue size: %d\n", rank, tmPtr->tskQueue.unsafe_size());
-        //     if(0.1 * nStaticJobs > tmPtr->tskQueue.unsafe_size())break;
-        // }
-
-
-        while(1){
-            // if(rank != 3){
-            //     fprintf(stderr, "[proc %d][start()] tsk queue size: %d\n",
-            //      rank, tmPtr->tskQueue.unsafe_size());
-            // }
-
-            for(int i=0; i<500;i++){
-                tmPtr->one_task();                 
-            }            
-
-
-            tmPtr->aggregate_tasks();
-            upload_completed_jobs();
-
-            check_enqueue_job_assignment();
-            check_receive_terminate_signal();
-
-            // tmPtr->one_task();
-        }  
+    void print_queue_sizes(){
+        fprintf(stderr, "");
     }
 
 
+    void start_process(){
+
+        tmPtr->start_thread();
+
+        int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
+        
+        while(tmPtr->tskQueue.unsafe_size() > 0.01 * nStaticTsks){
+
+            print_queue_sizes();
+     
+            for(int i=0;i<1;i++){
+                tmPtr->one_task();                 
+            }
+            
+            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
+
+                tmPtr->aggregate_tasks();
+
+                while(tmPtr->jobDoneQueue.unsafe_size() >= 100){
+                    upload_completed_jobs();
+                }                  
+            }
+        }  
+
+        while(!tmPtr->tskQueue.empty()){
+            tmPtr->one_task();   
+        }
+
+        tmPtr->join_thread();         
+        tmPtr->aggregate_tasks();
+        upload_completed_jobs();
+        
+
+        fprintf(stderr, "[proc %d][start] a\n", rank);
+
+        MPI_Finalize();
+
+        fprintf(stderr, "[proc %d][start] b\n", rank);
+
+        // check_enqueue_job_assignment();
+        // check_receive_terminate_signal();
+        // fprintf(stdout, "[proc %d][start()] f\n", rank);
+    }
+
+
+
+
+    // void print_progress(int period){
+    //     static int cnt=0;
+    //     cnt++;
+    //     if(!(cnt%period)){
+    //         printf("rendering...%5.2lf%%\r", 
+    //         (tmPtr->tskQueue.unsafe_size() / (tmPtr->nTotalJobs * tmPtr->nTskPerJob * 1.)) * 100.);
+    //     }
+    // }
 
 
     void static_job2task(){
@@ -946,30 +1001,30 @@ class Process{
 
     
 
-    void check_enqueue_job_assignment(){
-        int flag, recvSz;
-        MPI_Status status;
+    // void check_enqueue_job_assignment(){
+    //     int flag, recvSz;
+    //     MPI_Status status;
         
-        MPI_Iprobe(0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, &flag, &status);
-        if(!flag){return;}        
+    //     MPI_Iprobe(0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, &flag, &status);
+    //     if(!flag){return;}        
 
-        MPI_Get_count(&status, MPI_INT, &recvSz);
-        if(recvSz > jobBufSz){
-            fprintf(stderr, "\n[check_job_assignment()][proc %d] recvSz > jobBufSz.\
-                                                         Terminating...\n\n", rank);
-            exit(1);            
-        }
+    //     MPI_Get_count(&status, MPI_INT, &recvSz);
+    //     if(recvSz > jobBufSz){
+    //         fprintf(stderr, "\n[check_job_assignment()][proc %d] recvSz > jobBufSz.\
+    //                                                      Terminating...\n\n", rank);
+    //         exit(1);            
+    //     }
 
-		MPI_Recv(jobBuf, recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	// 	MPI_Recv(jobBuf, recvSz, MPI_INT, 0, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     
-        fprintf(stderr, "\n[proc %d][check_job_assignment()] recvSz: %d", rank, recvSz);
+    //     fprintf(stderr, "\n[proc %d][check_job_assignment()] recvSz: %d", rank, recvSz);
                                                                 
-        for(int i = 0; i < recvSz; i++){
-            tmPtr->job2task(jobBuf[i]);
-            fprintf(stderr, "\n[proc %d][check_job_assignment()] jobIdx: %d", rank, jobBuf[i]);
+    //     for(int i = 0; i < recvSz; i++){
+    //         tmPtr->job2task(jobBuf[i]);
+    //         fprintf(stderr, "\n[proc %d][check_job_assignment()] jobIdx: %d", rank, jobBuf[i]);
 
-        }
-    }
+    //     }
+    // }
 
 
     void upload_completed_jobs(){
@@ -1015,10 +1070,11 @@ class Process{
 
 
     ThreadManager *tmPtr;
-    int *jobBuf;
-    int jobBufSz;    
-    int jobDoneBuf[BUF_SIZE];
-    int jobDoneBufSz = BUF_SIZE;   
+    // int jobBuf[BUF_SIZE_JOB_ASSIGN];
+    // int jobBufSz = BUF_SIZE_JOB_ASSIGN;    
+
+    int jobDoneBuf[BUF_SIZE_JOB_UPLOAD];
+    int jobDoneBufSz = BUF_SIZE_JOB_UPLOAD;   
 
     int rank, worldSize;
     int startIdx, stopIdx, nStaticJobs;    
@@ -1026,6 +1082,18 @@ class Process{
 };    
 
 
+void write_png(ProcessManager* pm){
+
+    fprintf(stdout, "[write_png()] a\n");
+
+    unsigned error = lodepng_encode32_file(pm->filename, pm->raw_image, pm->tmPtr->width, pm->tmPtr->height);
+
+    fprintf(stdout, "[write_png()] b\n");
+
+    if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
+
+    fprintf(stdout, "[write_png()] c\n");
+}
 
 
 
@@ -1045,12 +1113,18 @@ int main(int argc, char** argv) {
 
         ProcessManager pm(argv, rank, worldSize);
         pm.start_process();
-        // fprintf(stderr, "write png\n");
-        pm.write_png();
+
+        fprintf(stdout, "[proc %d][main()] b\n", rank);
+
+        // pm.write_png();
+        write_png(&pm);
+
+        fprintf(stdout, "[proc %d][main()] c\n", rank);
     }
     else{
         Process proc(argv, rank, worldSize);
         proc.start_process();
+        
     }
 
    
