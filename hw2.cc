@@ -486,7 +486,6 @@ class ProcessManager{
 
     void static_job_assignment(){
         // no real msg passing.
-        fprintf(stderr, "[proc %d][static_job_assignment()] a\n", rank);
         int s, e;
 
         for(int pid=0; pid<worldSize; pid++){
@@ -533,7 +532,6 @@ class ProcessManager{
             tmPtr->one_task();
 
         }  
-        fprintf(stderr, "[proc %d][start()] e\n", rank);
         // tm->join_thread();  
     }
 
@@ -595,26 +593,20 @@ class ProcessManager{
         //      3. `procCtrlTbl[pid].nJobs`
 
         JobNode *backPtr = procCtrlTbl[pid].jobQueueBack;
-        fprintf(stderr, "[proc %d][enqueue_job()] d\n", rank);
         
         JobNode *curPtr  = new JobNode;
         curPtr->jobIdx = jobIdx;
         curPtr->next = NULL;
         curPtr->prev = backPtr;
         
-        fprintf(stderr, "[proc %d][enqueue_job()] pid: %d\n", rank, pid);
 
         if(backPtr){
-            fprintf(stderr, "[proc %d][enqueue_job()] e\n", rank);
             backPtr->next = curPtr;
-            fprintf(stderr, "[proc %d][enqueue_job()] e1\n", rank);
             
             procCtrlTbl[pid].jobQueueBack = curPtr;            
-            fprintf(stderr, "[proc %d][enqueue_job()] e2\n", rank);
             
         }
         else{ 
-            fprintf(stderr, "[proc %d][enqueue_job()] f\n", rank);
             procCtrlTbl[pid].jobQueueFront = curPtr;
             procCtrlTbl[pid].jobQueueBack = curPtr;
         }
