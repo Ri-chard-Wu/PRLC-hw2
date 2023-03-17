@@ -141,7 +141,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_JOB_CANCEL 1
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
-#define BUF_SIZE 2048
+#define BUF_SIZE 65536
 
 typedef int jobIdx_t;
 
@@ -524,7 +524,6 @@ class ProcessManager{
         tmPtr->start_thread();
 
 
-
         while(1){
             tmPtr->one_task();   
 
@@ -532,19 +531,22 @@ class ProcessManager{
             if(0.1 * nStaticJobs > tmPtr->tskQueue.unsafe_size())break;
         }
 
-        // while(1){
-        //     receive_completed_jobs();
-        //     tmPtr->aggregate_tasks();
-        //     local_receive_completed_jobs();  
-
-        //     print_proc_nJob();
-        // }
 
         while(1){
             
+            // fprintf(stderr, "[start()] a\n");
+
             receive_completed_jobs();
+            
+            // fprintf(stderr, "[start()] b\n");
+
             tmPtr->aggregate_tasks();
+
+            // fprintf(stderr, "[start()] c\n");
+
             local_receive_completed_jobs();
+
+            // fprintf(stderr, "[start()] d\n");
 
             // dynamic_job_assignment(); // has problem.
 
@@ -554,6 +556,7 @@ class ProcessManager{
         }  
 
     }
+
 
     void print_proc_nJob(){
         
@@ -615,7 +618,7 @@ class ProcessManager{
 
             recvCnt[pid] += recvSz;
 
-            if(recvCnt[pid] >= nStaticJobs){
+            if(recvCnt[pid] >= nStaticJobs*0.8){
                 fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
                 rank, pid, recvCnt[pid]);    
             }
@@ -871,24 +874,25 @@ class Process{
         tmPtr->start_thread();
 
 
-        // while(!tmPtr->tskQueue.empty()){
+        // while(1){
         //     tmPtr->one_task();  
+           
+
+        //     // fprintf(stderr, "[proc %d][start()] tsk queue size: %d\n", rank, tmPtr->tskQueue.unsafe_size());
+        //     if(0.1 * nStaticJobs > tmPtr->tskQueue.unsafe_size())break;
         // }
 
-        // tmPtr->aggregate_tasks();
-        // upload_completed_jobs(); 
-
-
-        
-        while(1){
-            tmPtr->one_task();  
-        
-            // fprintf(stderr, "[proc %d][start()] tsk queue size: %d\n", rank, tmPtr->tskQueue.unsafe_size());
-            if(0.1 * nStaticJobs > tmPtr->tskQueue.unsafe_size())break;
-        }
-
 
         while(1){
+            // if(rank != 3){
+            //     fprintf(stderr, "[proc %d][start()] tsk queue size: %d\n",
+            //      rank, tmPtr->tskQueue.unsafe_size());
+            // }
+
+            for(int i=0; i<500;i++){
+                tmPtr->one_task();                 
+            }            
+
 
             tmPtr->aggregate_tasks();
             upload_completed_jobs();
@@ -896,7 +900,7 @@ class Process{
             check_enqueue_job_assignment();
             check_receive_terminate_signal();
 
-            tmPtr->one_task();
+            // tmPtr->one_task();
         }  
     }
 
@@ -993,8 +997,9 @@ class Process{
         }
 
         if(ofst > 0){
-            // acc_ofst += ofst;
+            acc_ofst += ofst;
             // fprintf(stdout, "[proc %d][upload_completed_jobs()] ofst: %d\n", rank, ofst);
+            
 
             MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
         } 

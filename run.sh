@@ -8,25 +8,23 @@ cd ~/hw2/
 make clean; make 2> make-stderr.out
 RunFile=./hw2
 
+source ./testcases/06.txt
 
-n_node=2
-n_proc=4
-n_core=3
 
-# n_node=${1}
-# n_proc=${2}
-# n_core=${3}
-  
-num_threads=${n_core}
-x1=-0.522
-y1=2.874
-z1=1.340
-x2=0.0
-y2=0.0
-z2=0.0
-width=64
-height=64
-filename=out.png
+# N=2
+# n=4
+# c=3
+# x1=-0.522
+# y1=2.874
+# z1=1.340
+# x2=0.0
+# y2=0.0
+# z2=0.0
+# width=64
+# height=64
+
+num_threads=${c}
+outFile=out.png
 
 if [ -f "$RunFile" ]; then
 
@@ -34,7 +32,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Run hw2             ="
     echo "==================================="
 
-    srun -N ${n_node} -n ${n_proc} -c ${n_core} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $filename 2> run-stderr.out 
+    srun -N ${N} -n ${n} -c ${c} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out 
 
 
     echo "==================================="
@@ -48,7 +46,7 @@ if [ -f "$RunFile" ]; then
     echo "=            Validate             ="
     echo "==================================="
 
-    ./hw2-diff out.png ./testcases/01.png
+    ./hw2-diff $outFile $valid
 
 else
 

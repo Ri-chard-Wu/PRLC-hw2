@@ -1,8 +1,12 @@
 N=2
 n=3
 c=4
-pos=-0.522 2.874 1.340
-tarpos=0 0 0
+x1=-0.522 
+y1=2.874 
+z1=1.340
+x2=0
+y2=0
+z2=0
 width=64
 height=64
 timelimit=5
