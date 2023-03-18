@@ -3,7 +3,7 @@
 
 
 
-cd ~/hw2/
+cd ~/hw2/cod
 
 make clean; make 2> make-stderr.out
 RunFile=./hw2
