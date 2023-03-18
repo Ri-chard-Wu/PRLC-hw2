@@ -12,7 +12,7 @@ echo "=            Run lab2             ="
 echo "==================================="
 
 if [ -f "$FILE" ]; then
-    srun -N 1 -n 4 -c 1 ${FILE} 2> run-stderr.out 
+    srun -N 1 -n 1 -c 1 ${FILE} 2> run-stderr.out 
 else
     echo "" > run-stderr.out
 fi

@@ -8,7 +8,7 @@ cd ~/hw2/
 make clean; make 2> make-stderr.out
 RunFile=./hw2
 
-source ./testcases/06.txt
+source ./testcases/08.txt
 
 
 
@@ -36,7 +36,7 @@ if [ -f "$RunFile" ]; then
     echo "==================================="
 
     ./hw2-diff $outFile $valid
-    rm $outFile
+    # rm $outFile
 
 else
 

@@ -148,20 +148,25 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 typedef int jobIdx_t;
 
 
-struct Task{
-    int i;
-    int j;
-    int m;
-    int n;
-    vec4 result;
-};
+// struct Task{
+//     int i;
+//     int j;
+//     int m;
+//     int n;
+//     vec4 result;
+// };
 
 
-struct JCB{
-    int i;
-    int j;     
+// struct JCB{
+//     int i;
+//     int j;     
+//     vec4 result;
+//     int n;
+// };
+
+struct Job{
+    jobIdx_t idx;     
     vec4 result;
-    int n;
 };
 
 
@@ -194,26 +199,23 @@ class ThreadManager{
         width = atoi(argv[8]);
         height = atoi(argv[9]);
         nTotalJobs = width * height;
-        nTskPerJob = AA * AA;  
-
-
-        
+    
     }
 
 
     void start_thread(){
 
-        nTskThrds = num_threads - 1;
-        tskThrds = new pthread_t[nTskThrds];
+        nThrds = num_threads - 1;
+        thrds = new pthread_t[nThrds];
         entryArg* argPtr;
         int ret;
 
-        for(int i = 0; i < nTskThrds; i++){
+        for(int i = 0; i < nThrds; i++){
             argPtr = new entryArg;
             argPtr->objPtr = this;
             argPtr->tid = i;
 
-            ret = pthread_create(&tskThrds[i], NULL, thread_entry, (void *)argPtr);
+            ret = pthread_create(&thrds[i], NULL, thread_entry, (void *)argPtr);
             if(ret != 0) printf("create thread failed.\n");
         }
     }
@@ -224,7 +226,7 @@ class ThreadManager{
 
         int tid = argPtr->tid;
         ThreadManager *objPtr = (ThreadManager *)argPtr->objPtr;
-        objPtr->task(tid);
+        objPtr->job(tid);
         
         return NULL;
     }
@@ -232,8 +234,8 @@ class ThreadManager{
 
     void join_thread()
     {
-        for (int i = 0; i < nTskThrds; i++){
-            pthread_join(tskThrds[i], NULL);
+        for (int i = 0; i < nThrds; i++){
+            pthread_join(thrds[i], NULL);
         }  
 
         fprintf(stdout, "[proc %d][join_thread()] all threads joined.\n", rank);
@@ -242,113 +244,73 @@ class ThreadManager{
 
 
 
-    void job2task(int idx){
 
-        Task tsk;
-        jobIdx2ImgCoord(idx, &(tsk.i), &(tsk.j));
+    void job(int tid){
 
-        for (int m = 0; m < AA; ++m) {
-            tsk.m = m;
-            for (int n = 0; n < AA; ++n) {
-                tsk.n = n;
-                tskQueue.push(tsk);
-            }
-        }
-    }
+        Job job;
+        job.result = vec4(0.);
 
+        while(1){
+            if(!jobQueue.empty()){
 
+                if(!jobQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
 
-    void task(int tid){
-
-        Task tsk;
-
-
-        while(!tskQueue.empty()){
+                int i, j;
             
-            if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
+                jobIdx2ImgCoord(job.idx, &i, &j);
 
-            partial_AA(&tsk);
-            tskDoneQueue.push(tsk);
-           
-        }
+                for (int m = 0; m < AA; ++m) {
+                    for (int n = 0; n < AA; ++n) {
+                        
+                        job.result += partial_AA(i, j, m, n);;
+                    }
+                }       
+ 
+                job.result /= (double)(AA * AA);
+                job.result *= 255.0;
 
-
-        // while(1){
-        //     if(!tskQueue.empty()){
-        //         if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
-
-        //         partial_AA(&tsk);
-        //         tskDoneQueue.push(tsk);
-        //     }
-        // }
-    }
-
-
-    void one_task(){
-
-        Task tsk;
-        
-        // fprintf(stderr, "[proc %d][one_task()] c\n", rank);
-
-        if(!tskQueue.empty()){
-            if(!tskQueue.try_pop(tsk)){fprintf(stderr, "[task()] pop failed.\n");}
-
-            // if(rank==0)fprintf(stderr, "[proc %d][one_task()] d\n", rank);
-
-            partial_AA(&tsk);
-            tskDoneQueue.push(tsk);
-        }
-
-        // fprintf(stderr, "[proc %d][one_task()] e\n", rank);
-    }
-
-
-    void aggregate_tasks(){
-        
-        Task tsk;
-        JCB jcb;
-        jobIdx_t jobIdx;
-
-        while(!tskDoneQueue.empty()){
-            if(!tskDoneQueue.try_pop(tsk)){fprintf(stderr, "[aggregate_tasks()] pop failed.\n");}
-
-            imgCoord2JobIdx(tsk.i, tsk.j, &jobIdx);
-
-            if(is_in_jobCtrlTbl(jobIdx)){
-
-                jcb = jobCtrlTbl[jobIdx];
-                jcb.n++;
-                jcb.result += tsk.result;
-                if(jcb.n == nTskPerJob){
-                    jcb.result /= (double)(nTskPerJob);
-                    jcb.result *= 255.0;                     
-                    jobDoneQueue.push(jcb);
-                    // jobCtrlTbl.erase(jobIdx);
-                }
-                else if(jcb.n < nTskPerJob){
-                    jobCtrlTbl[jobIdx] = jcb;
-                }
-                else{
-                    fprintf(stderr, "[aggregate_tasks()] jcb.n > nTskPerJob." );
-                    exit(1);
-                }
-
-            }
-            else{
-                jcb.i = tsk.i;
-                jcb.j = tsk.j;
-                jcb.n = 1;
-                jcb.result = tsk.result;
-                jobCtrlTbl[jobIdx] = jcb;
+                jobDoneQueue.push(job);
             }
         }
     }
 
 
-    bool is_in_jobCtrlTbl(jobIdx_t jobIdx){
-        return !(jobCtrlTbl.find(jobIdx) == jobCtrlTbl.end());
+
+    void one_job(){
+
+        Job job;
+        job.result = vec4(0.);
+    
+        if(!jobQueue.empty()){
+            if(!jobQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
+
+            int i, j;
+        
+            jobIdx2ImgCoord(job.idx, &i, &j);
+
+            for (int m = 0; m < AA; ++m) {
+                for (int n = 0; n < AA; ++n) {
+                    
+                    job.result += partial_AA(i, j, m, n);;
+                }
+            } 
+            
+            job.result /= (double)(AA * AA);
+            job.result *= 255.0;
+    
+            jobDoneQueue.push(job);
+        }
+        
     }
 
+
+    void enqueue_job(jobIdx_t jobIdx){
+
+        Job job;
+        job.idx = jobIdx;
+
+        jobQueue.push(job);
+    }
 
 
     void jobIdx2ImgCoord(int idx, int* i, int* j){
@@ -360,14 +322,10 @@ class ThreadManager{
         *idx = i * ((int)width) + j;      
     }
 
-    void partial_AA(Task* tsk){
+
+    vec4 partial_AA(int i, int j, int m, int n){
 
         vec2 iResolution = vec2(width, height);
-
-        int i = tsk->i; 
-        int j = tsk->j; 
-        int m = tsk->m; 
-        int n = tsk->n;
 
         vec2 p = vec2(j, i) + vec2(m, n) / (double)AA;
 
@@ -423,22 +381,19 @@ class ThreadManager{
         
 
         col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
-        tsk->result = vec4(col, 1.);
+
+        return vec4(col, 1.);
     }
-
-
-
 
 
     int rank, worldSize;
 
-    concurrent_queue<Task> tskQueue;
-    concurrent_queue<Task> tskDoneQueue;
-    queue<JCB> jobDoneQueue;
+    concurrent_queue<Job> jobQueue;
+    concurrent_queue<Job> jobDoneQueue;
 
 
-    unsigned int nTskThrds;
-    pthread_t *tskThrds;
+    unsigned int nThrds;
+    pthread_t *thrds;
     
 
     unsigned int num_threads;  
@@ -447,9 +402,7 @@ class ThreadManager{
     vec3 camera_pos; 
     vec3 target_pos; 
     unsigned int nTotalJobs;
-    int nTskPerJob;
 
-    unordered_map<jobIdx_t, JCB> jobCtrlTbl;
 
     struct entryArg{
         ThreadManager* objPtr;
@@ -500,15 +453,20 @@ class ProcessManager{
             image[i] = raw_image + i * tmPtr->width * 4;
         }
 
-        static_job2task();
-        init_job_enqueue();
+        init_procCtrlTbl();
         
     }
 
 
 
-    void init_job_enqueue(){
-        // no real msg passing.
+    void enqueue_static_job(){
+        for(int i=startIdx;i<=stopIdx;i++){
+            tmPtr->enqueue_job(i);
+        }
+    }
+
+
+    void init_procCtrlTbl(){
         int s, e;
 
         for(int pid=0; pid < worldSize; pid++){
@@ -526,80 +484,34 @@ class ProcessManager{
             }
 
         }   
-        // fprintf(stderr, "[proc 0][init_job_enqueue()] tmPtr->nTotalJobs: %d\n", tmPtr->nTotalJobs);
-
-        // print_proc_nJob();
     }
 
-    void static_job2task(){
-        for(int idx = startIdx; idx <= stopIdx; idx++){
-            tmPtr->job2task(idx);
-        }    
-    }
 
 
     void start_process(){
-        // print_proc_nJob();
+
+        enqueue_static_job();
         tmPtr->start_thread();
 
-        int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
 
-        // while(tmPtr->tskQueue.unsafe_size() > 0.1 * nStaticTsks){
-        while(!tmPtr->tskQueue.empty()){
-     
-            for(int i=0;i<1;i++){
-                tmPtr->one_task();                 
+        while(1){
+
+            if(!tmPtr->jobQueue.empty()){
+
+                tmPtr->one_job();                 
             }
-            
-            // while(tmPtr->tskDoneQueue.unsafe_size() >= 100000){
-
-            //     tmPtr->aggregate_tasks();
-
-            //     local_receive_completed_jobs();
-                
-            // }
+            else{
+                local_receive_completed_jobs();
+                if(check_send_terminate_signal()) return;
+            }
 
             receive_completed_jobs();
         }  
 
-
-        tmPtr->join_thread(); 
-        while(nJobsCmpltd < nStaticJobs){
-            tmPtr->aggregate_tasks();
-            local_receive_completed_jobs();
-        }
         
-
-        print_queue_sizes();
-
-
-        while(!check_send_terminate_signal()){
-            receive_completed_jobs();
-        }  
-
-        fprintf(stderr, "[proc 0][start] a\n");
-        MPI_Finalize();
-        fprintf(stderr, "[proc 0][start] b\n");
-
-
-    }
-
-    void print_queue_sizes(){
-        fprintf(stderr, "[proc %d] queue sizes:   %d, %d, %d\n", rank, 
-        tmPtr->tskQueue.unsafe_size(), tmPtr->tskDoneQueue.unsafe_size(), 
-        tmPtr->jobDoneQueue.size());
-    }
-
-
-    void print_proc_nJob(){
-        
-        for(int pid=0; pid<worldSize; pid++){
-            
-            fprintf(stdout, "%d, ", procCtrlTbl[pid].nJobs);
-        }
-
-        fprintf(stdout, "\n");
-
+        // fprintf(stderr, "[proc 0][start] a\n");
+        // MPI_Finalize();
+        // fprintf(stderr, "[proc 0][start] b\n");
     }
 
 
@@ -607,44 +519,37 @@ class ProcessManager{
 
     void local_receive_completed_jobs(){
 
-        JCB jcb;
-        int ofst = 0, jobIdx; 
+        Job job;
+        int ofst = 0, i, j; 
 
         while(!tmPtr->jobDoneQueue.empty()){
-            // if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()]\
-            //                                          pop failed.\n");}
+            if(!tmPtr->jobDoneQueue.try_pop(job)){fprintf(stderr, "[upload_completed_jobs()]\
+                                                     pop failed.\n");}
 
-            jcb = tmPtr->jobDoneQueue.front();
-            tmPtr->jobDoneQueue.pop();
+            
+            tmPtr->jobIdx2ImgCoord(job.idx, &i, &j);
 
+            image[i][4 * j + 0] = (unsigned char)job.result.r;  
+            image[i][4 * j + 1] = (unsigned char)job.result.g;  
+            image[i][4 * j + 2] = (unsigned char)job.result.b;  
+            image[i][4 * j + 3] = (unsigned char)255;  
 
-            tmPtr->imgCoord2JobIdx(jcb.i, jcb.j, &jobIdx);
-
-            image[jcb.i][4 * jcb.j + 0] = (unsigned char)jcb.result.r;  
-            image[jcb.i][4 * jcb.j + 1] = (unsigned char)jcb.result.g;  
-            image[jcb.i][4 * jcb.j + 2] = (unsigned char)jcb.result.b;  
-            image[jcb.i][4 * jcb.j + 3] = (unsigned char)255;  
-
-            unqueue_job(0, jobIdx);
+            unqueue_job(0, job.idx);
             ofst++;
          
         }
         
         if(ofst > 0){
             nJobsCmpltd += ofst;
-            // fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n", rank, ofst);  
+
             fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
-            rank, nJobsCmpltd);   
-
-            fprintf(stderr, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
-            rank, nJobsCmpltd);                                   
+            rank, nJobsCmpltd);                                     
         }
-        
-
-
     }
 
-    int* recvCnt;
+
+
+    
     void receive_completed_jobs(){
 
         int flag, recvSz, i, j, data, jobIdx;
@@ -668,17 +573,19 @@ class ProcessManager{
             fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
             rank, pid, recvCnt[pid]/2); 
 
-            fprintf(stderr, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
-            rank, pid, recvCnt[pid]/2); 
-
+         
             for(int k = 0; k < recvSz; k += 2){
+
                 jobIdx = jobDoneBuf[k];
                 tmPtr->jobIdx2ImgCoord(jobIdx, &i, &j);
                 data = jobDoneBuf[k+1];
 
-                image[i][4 * j + 0] = (unsigned char)((data >> 24) &  dataMask);  
-                image[i][4 * j + 1] = (unsigned char)((data >> 16) &  dataMask);  
-                image[i][4 * j + 2] = (unsigned char)((data >> 8 ) &  dataMask);  
+        //         fprintf(stderr, "[proc %d][receive_completed_jobs()] jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
+        //   rank, jobIdx, i, j, (data >> 24) & dataMask, ((data >> 16) & dataMask), ((data >> 8 ) & dataMask)); 
+
+                image[i][4 * j + 0] = (unsigned char)((data >> 24) & dataMask);  
+                image[i][4 * j + 1] = (unsigned char)((data >> 16) & dataMask);  
+                image[i][4 * j + 2] = (unsigned char)((data >> 8 ) & dataMask);  
                 image[i][4 * j + 3] = (unsigned char)255;  
 
                 if(jobIdx < 0 || jobIdx >= (tmPtr->nTotalJobs)){
@@ -699,7 +606,6 @@ class ProcessManager{
         //      2. job queue
         //      3. `procCtrlTbl[pid].nJobs`
 
-        // fprintf(stderr, "[proc 0][enqueue_job()] pid: %d, jobIdx: %d\n", pid, jobIdx);
 
         JobNode *backPtr = procCtrlTbl[pid].jobQueueBack;
         
@@ -737,7 +643,6 @@ class ProcessManager{
 
         if(!curPtr){
             fprintf(stderr, "[proc %d][unqueue_job()] !curPtr. pid: %d, jobIdx: %d\n", rank, pid, jobIdx);
-            // exit(1);
             return;
         }
 
@@ -773,68 +678,75 @@ class ProcessManager{
 
 
 
-    void dynamic_job_assignment(){
+    // void dynamic_job_assignment(){
 
-        PCB* pcbPtr;
-        int minNJob = 1 << 16, minNJobPid;
-        int maxNJob = 0, maxNJobPid;
+    //     PCB* pcbPtr;
+    //     int minNJob = 1 << 16, minNJobPid;
+    //     int maxNJob = 0, maxNJobPid;
 
-        for(int pid=0; pid<worldSize; pid++){
-
-
-            if(minNJob > procCtrlTbl[pid].nJobs){
-                minNJob = procCtrlTbl[pid].nJobs;
-                minNJobPid = pid;
-            }
-
-            if(maxNJob < procCtrlTbl[pid].nJobs){
-                maxNJob = procCtrlTbl[pid].nJobs;
-                maxNJobPid = pid;
-            }
-        }
+    //     for(int pid=0; pid<worldSize; pid++){
 
 
-        jobIdx_t jobIdx;
-        if(maxNJob - minNJob >= 2){
+    //         if(minNJob > procCtrlTbl[pid].nJobs){
+    //             minNJob = procCtrlTbl[pid].nJobs;
+    //             minNJobPid = pid;
+    //         }
+
+    //         if(maxNJob < procCtrlTbl[pid].nJobs){
+    //             maxNJob = procCtrlTbl[pid].nJobs;
+    //             maxNJobPid = pid;
+    //         }
+    //     }
+
+
+    //     jobIdx_t jobIdx;
+    //     if(maxNJob - minNJob >= 2){
             
-            jobIdx = procCtrlTbl[maxNJobPid].jobQueueBack->jobIdx;
+    //         jobIdx = procCtrlTbl[maxNJobPid].jobQueueBack->jobIdx;
 
-            fprintf(stdout, "[dynamic_job_assignment()] maxNJob: %d, maxNJobPid: %d, minNJob: %d, minNJobPid: %d\n",
-                             maxNJob, maxNJobPid, minNJob, minNJobPid);
+    //         fprintf(stdout, "[dynamic_job_assignment()] maxNJob: %d, maxNJobPid: %d, minNJob: %d, minNJobPid: %d\n",
+    //                          maxNJob, maxNJobPid, minNJob, minNJobPid);
 
-            // fprintf(stderr, "[proc %d][dynamic_job_assignment()] a\n", rank);
+    //         // fprintf(stderr, "[proc %d][dynamic_job_assignment()] a\n", rank);
 
-            unqueue_job(maxNJobPid, jobIdx);
+    //         unqueue_job(maxNJobPid, jobIdx);
 
-            // fprintf(stderr, "[proc %d][dynamic_job_assignment()] b\n", rank);
+    //         enqueue_job(minNJobPid, jobIdx);
 
-            enqueue_job(minNJobPid, jobIdx);
-
-            // fprintf(stderr, "[proc %d][dynamic_job_assignment()] c\n", rank);
-
-            // dynamic_cancel_job(maxNJobPid, jobIdx);
-            dynamic_assign_job(minNJobPid, jobIdx);
-        }
-    }
+    //         dynamic_assign_job(minNJobPid, jobIdx);
+    //     }
+    // }
 
 
-    void dynamic_assign_job(int pid, jobIdx_t jobIdx){
-        if(pid != 0){
-            MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD);
-        }else{
-            tmPtr->job2task(jobIdx);
-        }            
+    // void dynamic_assign_job(int pid, jobIdx_t jobIdx){
+    //     if(pid != 0){
+    //         MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_ASSIGN, MPI_COMM_WORLD);
+    //     }else{
+    //         tmPtr->job2task(jobIdx);
+    //     }            
                 
-    }
+    // }
 
 
-    void dynamic_cancel_job(int pid, jobIdx_t jobIdx){
+    // void dynamic_cancel_job(int pid, jobIdx_t jobIdx){
                
-        if(pid != 0){
-            MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_CANCEL, MPI_COMM_WORLD); 
-        }else{
+    //     if(pid != 0){
+    //         MPI_Send(&jobIdx, 1, MPI_INT, pid, MPI_TAG_JOB_CANCEL, MPI_COMM_WORLD); 
+    //     }else{
             
-        }   
+    //     }   
+    // }
+
+
+    void print_proc_nJob(){
+        
+        for(int pid=0; pid<worldSize; pid++){
+            
+            fprintf(stdout, "%d, ", procCtrlTbl[pid].nJobs);
+        }
+
+        fprintf(stdout, "\n");
+
     }
 
 
@@ -854,21 +766,6 @@ class ProcessManager{
     }
 
 
-    // void write_png(){
-
-    //     fprintf(stdout, "[proc %d][write_png()] a\n", rank);
-
-    //     fprintf(stdout, "[proc %d][write_png()] width: %d, height: %d\n", rank, tmPtr->width, tmPtr->height);
-
-    //     unsigned error = lodepng_encode32_file(filename, raw_image, tmPtr->width, tmPtr->height);
-
-    //     fprintf(stdout, "[proc %d][write_png()] b\n", rank);
-
-    //     if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
-
-    //     fprintf(stdout, "[proc %d][write_png()] c\n", rank);
-    // }
-
 
     ThreadManager *tmPtr;
     
@@ -884,9 +781,13 @@ class ProcessManager{
 
     PCB* procCtrlTbl;
     unordered_map<jobIdx_t, JobNode *> jobNodeTbl;
+    
     int nJobsCmpltd;
+    int* recvCnt;
 
 };   
+
+
 
 
 
@@ -897,96 +798,78 @@ class Process{
     
     Process(char** argv, int rank, int worldSize){
 
-        // fprintf(stderr, "[proc %d][Process()] \n", rank);
-        // exit(1);
-
         tmPtr = new ThreadManager(argv, rank, worldSize);
 
           
         this->rank = rank;
         this->worldSize = worldSize;
+
         nStaticJobs =  tmPtr->nTotalJobs / worldSize; 
         startIdx = nStaticJobs * rank;
         if(rank < worldSize - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
         else if(rank == worldSize - 1){stopIdx = tmPtr->nTotalJobs - 1;}
+        
         nStaticJobs = stopIdx - startIdx + 1;
         nJobsUploaded = 0;
 
-        // fprintf(stderr, "[proc %d][Process()] \n", rank);
-
-        static_job2task();
+        
     }
 
 
-    void print_queue_sizes(){
-        fprintf(stderr, "[proc %d] queue sizes:   %d, %d, %d\n", rank, 
-        tmPtr->tskQueue.unsafe_size(), tmPtr->tskDoneQueue.unsafe_size(), 
-        tmPtr->jobDoneQueue.size());
+    void enqueue_static_job(){
+        for(int i=startIdx;i<=stopIdx;i++){
+            tmPtr->enqueue_job(i);
+        }
     }
 
 
     void start_process(){
-
-        tmPtr->start_thread();
-
-
-
-        int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
         
-        while(!tmPtr->tskQueue.empty()){
-     
-            for(int i=0;i<1;i++){
-                tmPtr->one_task();                 
-            }
-            
-            // while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
-            while(tmPtr->tskDoneQueue.unsafe_size() >= 10000){
-                tmPtr->aggregate_tasks();
-                // while(tmPtr->jobDoneQueue.size() >= 0.01 * nStaticJobs){
-                // while(tmPtr->jobDoneQueue.size() >= 2500){
-                upload_completed_jobs();
-                
-                // }                  
-            }
+        enqueue_static_job();
+        tmPtr->start_thread();
+        
+        while(1){
 
-            // print_queue_sizes();
-            
+            if(!tmPtr->jobQueue.empty()){
+
+                tmPtr->one_job();                 
+
+                while(tmPtr->jobDoneQueue.unsafe_size() >= 2500){
+                    upload_completed_jobs();
+                }
+            }
+            else{
+                upload_completed_jobs();
+                check_receive_terminate_signal();
+            }
         }  
 
-
-        tmPtr->join_thread();    
-        while(nJobsUploaded < nStaticJobs){
-            tmPtr->aggregate_tasks();
-            upload_completed_jobs();
-        }
-  
-
-
-
-        fprintf(stderr, "[proc %d][start] a\n", rank);
-        MPI_Finalize();
-        fprintf(stderr, "[proc %d][start] b\n", rank);
-
-        // check_enqueue_job_assignment();
-        // check_receive_terminate_signal();
-        // fprintf(stdout, "[proc %d][start()] f\n", rank);
+        // fprintf(stderr, "[proc %d][start] a\n", rank);
+        // MPI_Finalize();
+        // fprintf(stderr, "[proc %d][start] b\n", rank);
     }
 
 
 
+    void upload_completed_jobs(){
 
+        Job job;
+        int ofst = 0; 
 
+        while(!tmPtr->jobDoneQueue.empty()){
+            if(!tmPtr->jobDoneQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
 
-    void static_job2task(){
-        
-        // fprintf(stderr, "[proc %d][static_job2task()] \n", rank);
+            jobDoneBuf[ofst++] = job.idx;
+            jobDoneBuf[ofst++] = (((int)job.result.r) << 24) | (((int)job.result.g) << 16) | 
+                (((int)job.result.b) << 8) | ((int)255);       
 
-        for(int idx = startIdx; idx <= stopIdx; idx++){
-            tmPtr->job2task(idx);
-        }    
+            if(ofst >= jobDoneBufSz) break;
+        }
 
-        // fprintf(stderr, "[proc %d][static_job2task()] \n", rank);
-        // exit(1);        
+        if(ofst > 0){
+            nJobsUploaded += ofst/2;
+            MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
+        } 
     }
 
 
@@ -1042,46 +925,6 @@ class Process{
     // }
 
 
-    void upload_completed_jobs(){
-
-        JCB jcb;
-        int ofst = 0, jobIdx; 
-        // int acc_ofst = 0;
-
-        while(!tmPtr->jobDoneQueue.empty()){
-            // if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
-            jcb = tmPtr->jobDoneQueue.front();
-            tmPtr->jobDoneQueue.pop();
-
-            tmPtr->imgCoord2JobIdx(jcb.i, jcb.j, &jobIdx);
-
-            // fprintf(stderr, "[proc %d][upload_completed_jobs()]\
-            //                      i: %d, j: %d, jobIdx: %d\n", rank, jcb.i, jcb.j, jobIdx);
-
-            jobDoneBuf[ofst++] = jobIdx;
-
-            // fprintf(stdout, "[proc %d][upload_completed_jobs()] jcb.result.r: %d\n", rank, (int)jcb.result.r);
-
-            jobDoneBuf[ofst++] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
-                (((int)jcb.result.b) << 8) | ((int)255);       
-
-            if(ofst >= jobDoneBufSz)break;
-        }
-
-        if(ofst > 0){
-            nJobsUploaded += ofst/2;
-            // fprintf(stdout, "[proc %d][upload_completed_jobs()] ofst: %d\n", rank, ofst);
-            
-
-            MPI_Send(&jobDoneBuf, ofst, MPI_INT, 0, MPI_TAG_JOB_UPLOAD, MPI_COMM_WORLD);
-        } 
-
-
-        // if(acc_ofst == 2 * nStaticJobs){
-        //     fprintf(stdout, "[proc %d][upload_completed_jobs()] all %d static jobs has been uploaded", acc_ofst);
-        // }
-
-    }
 
 
 
@@ -1147,6 +990,8 @@ int main(int argc, char** argv) {
         proc.start_process();
         
     }
+
+    fprintf(stdout, "[proc %d][main()] d\n", rank);
 
    
 
