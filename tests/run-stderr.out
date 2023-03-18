@@ -1,4 +1,5 @@
-srun: Force Terminated job 4293773
+srun: interrupt (one more within 1 sec to abort)
+srun: step:4294047.0 tasks 0-3: running
+srun: sending Ctrl-C to job 4294047.0
 srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
-slurmstepd: error: *** STEP 4293773.0 ON apollo32 CANCELLED AT 2023-03-17T18:52:28 DUE TO TIME LIMIT ***
-srun: error: apollo32: task 0: Terminated
+slurmstepd: error: *** STEP 4294047.0 ON apollo32 CANCELLED AT 2023-03-18T08:34:08 ***

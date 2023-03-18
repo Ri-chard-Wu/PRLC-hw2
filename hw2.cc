@@ -142,8 +142,8 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_JOB_CANCEL 1
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
-#define BUF_SIZE_JOB_UPLOAD 100000
-#define BUF_SIZE_JOB_ASSIGN 1000
+#define BUF_SIZE_JOB_UPLOAD 10000
+// #define BUF_SIZE_JOB_ASSIGN 1000
 
 typedef int jobIdx_t;
 
@@ -428,17 +428,13 @@ class ThreadManager{
 
 
 
-    int get_task_num(){
-        return tskQueue.unsafe_size();
-    }
-
 
 
     int rank, worldSize;
 
     concurrent_queue<Task> tskQueue;
     concurrent_queue<Task> tskDoneQueue;
-    concurrent_queue<JCB> jobDoneQueue;
+    queue<JCB> jobDoneQueue;
 
 
     unsigned int nTskThrds;
@@ -485,6 +481,7 @@ class ProcessManager{
         for(int pid=1; pid<worldSize; pid++){
             recvCnt[pid] = 0;
         }
+        nJobsCmpltd = 0;
 
 
 
@@ -554,7 +551,7 @@ class ProcessManager{
 
                 tmPtr->aggregate_tasks();
 
-                while(tmPtr->jobDoneQueue.unsafe_size() >= 0.1 * nStaticJobs){
+                while(tmPtr->jobDoneQueue.size() >= 0.1 * nStaticJobs){
                     local_receive_completed_jobs();
                 } 
             }
@@ -563,13 +560,14 @@ class ProcessManager{
         }  
 
 
-        // while(!tmPtr->tskQueue.empty()){
-        //     tmPtr->one_task();   
-        // }
-
         tmPtr->join_thread(); 
-        tmPtr->aggregate_tasks();
-        local_receive_completed_jobs();
+        while(nJobsCmpltd < nStaticJobs){
+            tmPtr->aggregate_tasks();
+            local_receive_completed_jobs();
+        }
+        
+
+        print_queue_sizes();
 
 
         while(!check_send_terminate_signal()){
@@ -583,7 +581,11 @@ class ProcessManager{
 
     }
 
-
+    void print_queue_sizes(){
+        fprintf(stderr, "[proc %d] queue sizes:   %d, %d, %d\n", rank, 
+        tmPtr->tskQueue.unsafe_size(), tmPtr->tskDoneQueue.unsafe_size(), 
+        tmPtr->jobDoneQueue.size());
+    }
 
 
     void print_proc_nJob(){
@@ -603,11 +605,16 @@ class ProcessManager{
     void local_receive_completed_jobs(){
 
         JCB jcb;
-        static int ofst = 0, jobIdx; 
+        int ofst = 0, jobIdx; 
 
         while(!tmPtr->jobDoneQueue.empty()){
-            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()]\
-                                                     pop failed.\n");}
+            // if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()]\
+            //                                          pop failed.\n");}
+
+            jcb = tmPtr->jobDoneQueue.front();
+            tmPtr->jobDoneQueue.pop();
+
+
             tmPtr->imgCoord2JobIdx(jcb.i, jcb.j, &jobIdx);
 
             image[jcb.i][4 * jcb.j + 0] = (unsigned char)jcb.result.r;  
@@ -621,9 +628,10 @@ class ProcessManager{
         }
         
         if(ofst > 0){
+            nJobsCmpltd += ofst;
             // fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n", rank, ofst);  
             fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
-            rank, ofst);             
+            rank, nJobsCmpltd);             
         }
         
 
@@ -866,6 +874,7 @@ class ProcessManager{
 
     PCB* procCtrlTbl;
     unordered_map<jobIdx_t, JobNode *> jobNodeTbl;
+    int nJobsCmpltd;
 
 };   
 
@@ -902,7 +911,7 @@ class Process{
     void print_queue_sizes(){
         fprintf(stderr, "[proc %d] queue sizes:   %d, %d, %d\n", rank, 
         tmPtr->tskQueue.unsafe_size(), tmPtr->tskDoneQueue.unsafe_size(), 
-        tmPtr->jobDoneQueue.unsafe_size());
+        tmPtr->jobDoneQueue.size());
     }
 
 
@@ -910,51 +919,44 @@ class Process{
 
         tmPtr->start_thread();
 
+
+
         int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
         
-        // while(tmPtr->tskQueue.unsafe_size() > 0.01 * nStaticTsks){
         while(!tmPtr->tskQueue.empty()){
-
-            // print_queue_sizes();
      
             for(int i=0;i<1;i++){
                 tmPtr->one_task();                 
             }
             
-            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
-
+            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
                 tmPtr->aggregate_tasks();
-
-                while(tmPtr->jobDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
+                while(tmPtr->jobDoneQueue.size() >= 0.01 * nStaticJobs){
                     upload_completed_jobs();
                 }                  
             }
+
+            // print_queue_sizes();
+            
         }  
 
-        // while(!tmPtr->tskQueue.empty()){
-        //     tmPtr->one_task();   
-        // }
-
-        print_queue_sizes();
 
         tmPtr->join_thread();    
         while(nJobsUploaded < nStaticJobs){
             tmPtr->aggregate_tasks();
             upload_completed_jobs();
-            fprintf(stderr, "[proc %d][start] nJobsUploaded: %d, nStaticTsks: %d\n", 
-            rank, nJobsUploaded, nStaticTsks);
         }
-        fprintf(stderr, "[proc %d][start] nJobsUploaded: %d, nStaticTsks: %d\n", 
-        rank, nJobsUploaded, nStaticTsks);
-
-        print_queue_sizes();
-        
+  
 
         fprintf(stderr, "[proc %d][start] a\n", rank);
-
         MPI_Finalize();
-
         fprintf(stderr, "[proc %d][start] b\n", rank);
+        return;
+        
+
+        // fprintf(stderr, "[proc %d][start] a\n", rank);
+        // MPI_Finalize();
+        // fprintf(stderr, "[proc %d][start] b\n", rank);
 
         // check_enqueue_job_assignment();
         // check_receive_terminate_signal();
@@ -1046,7 +1048,9 @@ class Process{
         // int acc_ofst = 0;
 
         while(!tmPtr->jobDoneQueue.empty()){
-            if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
+            // if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
+            jcb = tmPtr->jobDoneQueue.front();
+            tmPtr->jobDoneQueue.pop();
 
             tmPtr->imgCoord2JobIdx(jcb.i, jcb.j, &jobIdx);
 
@@ -1060,7 +1064,7 @@ class Process{
             jobDoneBuf[ofst++] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
                 (((int)jcb.result.b) << 8) | ((int)255);       
 
-            if(ofst >= jobDoneBufSz)break;
+            if(ofst >= jobDoneBufSz-2)break;
         }
 
         if(ofst > 0){

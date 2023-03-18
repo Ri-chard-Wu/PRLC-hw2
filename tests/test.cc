@@ -21,13 +21,13 @@ void receiver(int rank, int world_size){
     int data[1000000];
     int status_idle = 0, all_idle_mask = ((1 << (world_size - 1)) - 1) << 1;
    
-    printf("[proc %d] doing other work...\n", rank);
-    for(unsigned int i = 0; i < 100000000; i++){
-        for(unsigned int j = 0; j < 10; j++){
-            a = a * b;
-        }
-    }
-    printf("[proc %d] finish other work: a: %f. Begin to recv...\n", rank, a);
+    // printf("[proc %d] doing other work...\n", rank);
+    // for(unsigned int i = 0; i < 100000000; i++){
+    //     for(unsigned int j = 0; j < 10; j++){
+    //         a = a * b;
+    //     }
+    // }
+    // printf("[proc %d] finish other work: a: %f. Begin to recv...\n", rank, a);
 
 
 
@@ -48,19 +48,28 @@ void receiver(int rank, int world_size){
       		
         }
     }
+    MPI_Finalize();
 }
 
 
 
 void sender(int rank){
-	int sz = 1000000;
+	int sz = 1000000, nMsg=30;
 	int data[sz];
 
     for(int i = 0; i < sz; i++){
         data[i] = i*2;        
-    }	
-    printf("[proc %d] send data. size: %d\n", rank, sz);
-    MPI_Send(data, sz, MPI_INT, 0, SEND_INT, MPI_COMM_WORLD);
+    }
+
+    for(int j=0;j<nMsg;j++){
+        printf("[proc %d] send %d'th data. size: %d\n", rank, j, sz);
+        MPI_Send(data, sz, MPI_INT, 0, SEND_INT, MPI_COMM_WORLD);
+    }
+	
+
+
+    MPI_Finalize();
+    printf("[proc %d] don finalizing\n", rank);
 }
 
 
