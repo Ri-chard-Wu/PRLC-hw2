@@ -148,21 +148,6 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 typedef int jobIdx_t;
 
 
-// struct Task{
-//     int i;
-//     int j;
-//     int m;
-//     int n;
-//     vec4 result;
-// };
-
-
-// struct JCB{
-//     int i;
-//     int j;     
-//     vec4 result;
-//     int n;
-// };
 
 struct Job{
     jobIdx_t idx;     
@@ -182,6 +167,11 @@ struct PCB{
     JobNode* jobQueueFront;
     JobNode* jobQueueBack;
 };
+
+
+
+
+
 
 
 
@@ -414,6 +404,160 @@ class ThreadManager{
 
 
 
+
+
+template <class Ket_t>
+class MapQueue{
+    public:
+
+    MapQueue(){
+        nNodes = 0;
+    }
+
+
+
+    bool try_pop(Ket_t* key){
+        if(!nNodes) return false;
+
+        *key = frontKey;
+        remove(frontKey);
+
+        return true;
+    }
+
+
+
+    void push(Ket_t key){
+        // - to update:
+        // 1. nNodes
+        // 2. nodeTbl (neighboring nodes, and insert the new node)
+        // 3. backKey, frontKey
+
+
+        if(is_inside(key)){
+            fprintf(stderr, "[MapQueue::remove()] key already exist: %d\n", key);
+            return;
+        }
+
+
+        Node node;
+
+        if(!nNodes){
+            node.nextKey = key;
+            node.prevKey = key;
+            nodeTbl[key] = node;
+
+            frontKey = key;
+            backKey = key;
+            
+            nNodes++;
+        }
+        else{
+            node.nextKey = frontKey;
+            node.prevKey = backKey;
+            nodeTbl[key] = node;
+
+            nodeTbl[backKey].nextKey = key;
+            nodeTbl[frontKey].prevKey = key;
+
+            backKey = key;
+
+            nNodes++;
+        }
+    }
+
+
+    bool is_inside(Ket_t key){
+        return !(nodeTbl.find(key) == nodeTbl.end());
+    }
+
+
+    void remove(Ket_t key){
+
+        if(!is_inside(key)){
+            fprintf(stderr, "[MapQueue::remove()] key not found: %d\n", key);
+            return;
+        }
+
+
+
+
+        if((key != frontKey) && (key != backKey)){
+
+            Ket_t nextkey, prevKey;
+
+            nextkey = nodeTbl[key].nextKey;
+            prevKey = nodeTbl[key].prevKey;
+
+            nodeTbl[nextkey].prevKey = prevKey;
+            nodeTbl[prevKey].nextKey = nextkey;
+
+            nodeTbl.erase(key);
+            nNodes--;
+
+        }
+        else if((key == frontKey) && (key == backKey)){
+
+            nodeTbl.erase(key);
+            nNodes--;
+
+            assert(nNodes == 0);
+        }
+        else if(key == frontKey){
+
+            Ket_t nextkey, prevKey;
+            nextkey = nodeTbl[frontKey].nextKey;
+            prevKey = nodeTbl[frontKey].prevKey;
+
+            nodeTbl[nextkey].prevKey = prevKey;
+            nodeTbl[prevKey].nextKey = nextkey;
+
+            frontKey = nextkey;
+
+            nodeTbl.erase(key);
+            nNodes--;
+
+        }
+        else if(key == backKey){
+            // backKey = prevKey;
+
+            Ket_t nextkey, prevKey;
+            nextkey = nodeTbl[backKey].nextKey;
+            prevKey = nodeTbl[backKey].prevKey;
+
+            nodeTbl[nextkey].prevKey = prevKey;
+            nodeTbl[prevKey].nextKey = nextkey;
+
+            backKey = prevKey;
+
+            nodeTbl.erase(key);
+            nNodes--;
+        }
+
+
+    }
+
+
+
+    struct Node{
+        Ket_t nextKey;
+        Ket_t prevKey;
+    };
+
+
+
+    unordered_map<Ket_t, Node> nodeTbl;
+    Ket_t frontKey, backKey;
+    int nNodes;
+};
+
+
+
+
+
+
+
+
 class ProcessManager{ 
     public:
     
@@ -454,6 +598,7 @@ class ProcessManager{
         }
 
         init_procCtrlTbl();
+        init_jobSchdlQueue();
         
     }
 
@@ -464,6 +609,7 @@ class ProcessManager{
             tmPtr->enqueue_job(i);
         }
     }
+
 
 
     void init_procCtrlTbl(){
@@ -480,17 +626,35 @@ class ProcessManager{
             }
             
             for(int jobIdx = s; jobIdx <= e; jobIdx++){
-                enqueue_job(pid, jobIdx);
+                pcb_insert_job(pid, jobIdx);
             }
 
         }   
     }
+    
 
+    void init_jobSchdlQueue(){
+        for(int i=startIdx; i<=stopIdx; i++){
+            jobSchdlQueue.push(i);
+        }
+    }
+
+
+
+    void enqueue_n_job(int n){
+        for(int i=0;i<n;i++){
+            jobIdx_t jobIdx;
+            if(jobSchdlQueue.try_pop(&jobIdx)){
+                tmPtr->jobQueue.push(jobIdx);
+            }
+        }
+    }
 
 
     void start_process(){
 
-        enqueue_static_job();
+        // enqueue_static_job();
+        enqueue_n_job(10 * tmPtr->nThrds);
         tmPtr->start_thread();
 
 
@@ -534,7 +698,7 @@ class ProcessManager{
             image[i][4 * j + 2] = (unsigned char)job.result.b;  
             image[i][4 * j + 3] = (unsigned char)255;  
 
-            unqueue_job(0, job.idx);
+            pcb_remove_job(0, job.idx);
             ofst++;
          
         }
@@ -593,14 +757,14 @@ class ProcessManager{
                     exit(1);
                 }
 
-                unqueue_job(pid, jobIdx);
+                pcb_remove_job(pid, jobIdx);
 
             }
         }
     }
 
 
-    void enqueue_job(int pid, jobIdx_t jobIdx){
+    void pcb_insert_job(int pid, jobIdx_t jobIdx){
         // - Three things to update:
         //      1. `jobNodeTbl`
         //      2. job queue
@@ -632,7 +796,7 @@ class ProcessManager{
 
 
 
-    void unqueue_job(int pid, jobIdx_t jobIdx){
+    void pcb_remove_job(int pid, jobIdx_t jobIdx){
         // - Three things to update:
         //      1. `jobNodeTbl`
         //      2. job queue
@@ -642,7 +806,7 @@ class ProcessManager{
         JobNode *curPtr = jobNodeTbl[jobIdx];
 
         if(!curPtr){
-            fprintf(stderr, "[proc %d][unqueue_job()] !curPtr. pid: %d, jobIdx: %d\n", rank, pid, jobIdx);
+            fprintf(stderr, "[proc %d][pcb_remove_job()] !curPtr. pid: %d, jobIdx: %d\n", rank, pid, jobIdx);
             return;
         }
 
@@ -659,7 +823,7 @@ class ProcessManager{
         else if(fNdPtr && !bNdPtr){
             fNdPtr->next = NULL;
             procCtrlTbl[pid].jobQueueBack = fNdPtr;
-            // fprintf(stderr, "[proc 0][unqueue_job()] back jobIdx: %d\n",
+            // fprintf(stderr, "[proc 0][pcb_remove_job()] back jobIdx: %d\n",
             //      rank,  procCtrlTbl[pid].jobQueueBack->jobIdx);
         }
         else if(!fNdPtr && bNdPtr){
@@ -709,9 +873,9 @@ class ProcessManager{
 
     //         // fprintf(stderr, "[proc %d][dynamic_job_assignment()] a\n", rank);
 
-    //         unqueue_job(maxNJobPid, jobIdx);
+    //         pcb_remove_job(maxNJobPid, jobIdx);
 
-    //         enqueue_job(minNJobPid, jobIdx);
+    //         pcb_insert_job(minNJobPid, jobIdx);
 
     //         dynamic_assign_job(minNJobPid, jobIdx);
     //     }
@@ -785,8 +949,9 @@ class ProcessManager{
     int nJobsCmpltd;
     int* recvCnt;
 
-};   
+    MapQueue<jobIdx_t> jobSchdlQueue;
 
+};   
 
 
 
