@@ -142,7 +142,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_JOB_CANCEL 1
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
-#define BUF_SIZE_JOB_UPLOAD 1500
+#define BUF_SIZE_JOB_UPLOAD 100000
 #define BUF_SIZE_JOB_ASSIGN 1000
 
 typedef int jobIdx_t;
@@ -541,13 +541,10 @@ class ProcessManager{
         // print_proc_nJob();
         tmPtr->start_thread();
 
-
-
-
-
         int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
 
-        while(tmPtr->tskQueue.unsafe_size() > 0.1 * nStaticTsks){
+        // while(tmPtr->tskQueue.unsafe_size() > 0.1 * nStaticTsks){
+        while(!tmPtr->tskQueue.empty()){
      
             for(int i=0;i<1;i++){
                 tmPtr->one_task();                 
@@ -566,9 +563,9 @@ class ProcessManager{
         }  
 
 
-        while(!tmPtr->tskQueue.empty()){
-            tmPtr->one_task();   
-        }
+        // while(!tmPtr->tskQueue.empty()){
+        //     tmPtr->one_task();   
+        // }
 
         tmPtr->join_thread(); 
         tmPtr->aggregate_tasks();
@@ -893,6 +890,8 @@ class Process{
         startIdx = nStaticJobs * rank;
         if(rank < worldSize - 1){stopIdx = nStaticJobs * (rank + 1) - 1;}
         else if(rank == worldSize - 1){stopIdx = tmPtr->nTotalJobs - 1;}
+        nStaticJobs = stopIdx - startIdx + 1;
+        nJobsUploaded = 0;
 
         // fprintf(stderr, "[proc %d][Process()] \n", rank);
 
@@ -901,7 +900,9 @@ class Process{
 
 
     void print_queue_sizes(){
-        fprintf(stderr, "");
+        fprintf(stderr, "[proc %d] queue sizes:   %d, %d, %d\n", rank, 
+        tmPtr->tskQueue.unsafe_size(), tmPtr->tskDoneQueue.unsafe_size(), 
+        tmPtr->jobDoneQueue.unsafe_size());
     }
 
 
@@ -911,31 +912,42 @@ class Process{
 
         int nStaticTsks = nStaticJobs * tmPtr->nTskPerJob;
         
-        while(tmPtr->tskQueue.unsafe_size() > 0.01 * nStaticTsks){
+        // while(tmPtr->tskQueue.unsafe_size() > 0.01 * nStaticTsks){
+        while(!tmPtr->tskQueue.empty()){
 
-            print_queue_sizes();
+            // print_queue_sizes();
      
             for(int i=0;i<1;i++){
                 tmPtr->one_task();                 
             }
             
-            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
+            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
 
                 tmPtr->aggregate_tasks();
 
-                while(tmPtr->jobDoneQueue.unsafe_size() >= 100){
+                while(tmPtr->jobDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
                     upload_completed_jobs();
                 }                  
             }
         }  
 
-        while(!tmPtr->tskQueue.empty()){
-            tmPtr->one_task();   
-        }
+        // while(!tmPtr->tskQueue.empty()){
+        //     tmPtr->one_task();   
+        // }
 
-        tmPtr->join_thread();         
-        tmPtr->aggregate_tasks();
-        upload_completed_jobs();
+        print_queue_sizes();
+
+        tmPtr->join_thread();    
+        while(nJobsUploaded < nStaticJobs){
+            tmPtr->aggregate_tasks();
+            upload_completed_jobs();
+            fprintf(stderr, "[proc %d][start] nJobsUploaded: %d, nStaticTsks: %d\n", 
+            rank, nJobsUploaded, nStaticTsks);
+        }
+        fprintf(stderr, "[proc %d][start] nJobsUploaded: %d, nStaticTsks: %d\n", 
+        rank, nJobsUploaded, nStaticTsks);
+
+        print_queue_sizes();
         
 
         fprintf(stderr, "[proc %d][start] a\n", rank);
@@ -1031,7 +1043,7 @@ class Process{
 
         JCB jcb;
         int ofst = 0, jobIdx; 
-        int acc_ofst = 0;
+        // int acc_ofst = 0;
 
         while(!tmPtr->jobDoneQueue.empty()){
             if(!tmPtr->jobDoneQueue.try_pop(jcb)){fprintf(stderr, "[upload_completed_jobs()] pop failed.\n");}
@@ -1052,7 +1064,7 @@ class Process{
         }
 
         if(ofst > 0){
-            acc_ofst += ofst;
+            nJobsUploaded += ofst/2;
             // fprintf(stdout, "[proc %d][upload_completed_jobs()] ofst: %d\n", rank, ofst);
             
 
@@ -1077,7 +1089,8 @@ class Process{
     int jobDoneBufSz = BUF_SIZE_JOB_UPLOAD;   
 
     int rank, worldSize;
-    int startIdx, stopIdx, nStaticJobs;    
+    int startIdx, stopIdx, nStaticJobs;  
+    int nJobsUploaded;  
     
 };    
 

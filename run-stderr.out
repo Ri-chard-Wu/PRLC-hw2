@@ -1,0 +1,26 @@
+[proc 3] queue sizes:   0, 90019, 89638
+[proc 3][start] nJobsUploaded: 200000, nStaticTsks: 1048576
+[proc 3][start] nJobsUploaded: 250000, nStaticTsks: 1048576
+[proc 3][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 3][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 3] queue sizes:   0, 0, 0
+[proc 3][start] a
+[proc 2] queue sizes:   0, 96508, 88015
+[proc 2][start] nJobsUploaded: 200000, nStaticTsks: 1048576
+[proc 2][start] nJobsUploaded: 250000, nStaticTsks: 1048576
+[proc 2][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 2][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 2] queue sizes:   0, 0, 0
+[proc 2][start] a
+[proc 1] queue sizes:   0, 101184, 86847
+[proc 1][start] nJobsUploaded: 200000, nStaticTsks: 1048576
+[proc 1][start] nJobsUploaded: 250000, nStaticTsks: 1048576
+[proc 1][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 1][start] nJobsUploaded: 262144, nStaticTsks: 1048576
+[proc 1] queue sizes:   0, 0, 0
+[proc 1][start] a
+[proc 0][start] a
+[proc 1][start] b
+[proc 3][start] b
+[proc 2][start] b
+[proc 0][start] b

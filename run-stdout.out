@@ -1,0 +1,37 @@
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 26635
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 53261
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 79885
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 106507
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 50000
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 133131
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 50000
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 50000
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 159760
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 100000
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 186376
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 150000
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 100000
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 100000
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 212992
+[proc 3][join_thread()] all threads joined.
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 200000
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 250000
+[proc 0][receive_completed_jobs()] from pid 3 recvSz: 262144
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 239363
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 150000
+[proc 0][join_thread()] all threads joined.
+[proc 0][receive_completed_jobs()] from pid 0 recvSz: 262144
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 150000
+[proc 2][join_thread()] all threads joined.
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 200000
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 250000
+[proc 0][receive_completed_jobs()] from pid 2 recvSz: 262144
+[proc 1][join_thread()] all threads joined.
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 200000
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 250000
+[proc 0][receive_completed_jobs()] from pid 1 recvSz: 262144
+[proc 0][main()] b
+[write_png()] a
+[write_png()] b
+[write_png()] c
+[proc 0][main()] c
