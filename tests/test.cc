@@ -19,7 +19,7 @@ class MapQueue{
 
 
 
-    bool try_pop(Ket_t* key){
+    bool try_pop_front(Ket_t* key){
         if(!nNodes) return false;
 
         *key = frontKey;
@@ -28,6 +28,16 @@ class MapQueue{
         return true;
     }
 
+
+
+    bool try_pop_back(Ket_t* key){
+        if(!nNodes) return false;
+
+        *key = backKey;
+        remove(backKey);
+
+        return true;
+    }
 
 
     void push(Ket_t key){
@@ -159,54 +169,141 @@ class MapQueue{
 int main()
 {
 
+
     MapQueue<int> mq;
 
     mq.push(21);
-    mq.push(211);
-    mq.push(31);
-    mq.push(21);
+    mq.push(122);
+    mq.push(102); 
+    mq.push(100);
+    mq.remove(100);
+    mq.push(1202); 
+    mq.push(430);
+    mq.push(4300);    
+
+    int out;
+    for(int i=0;i<3;i++){
+        if(mq.try_pop_front(&out)){
+            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+        }
+    }
+    cout<<endl;
+
+    mq.remove(1202);
+    mq.push(12020); 
+    mq.push(4310);
+    mq.push(43000);   
+
+    for(int i=0;i<2;i++){
+        if(mq.try_pop_front(&out)){
+            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+        }  
+    }
+    cout<<endl;
+
+
+    for(int i=0;i<2;i++){
+        if(mq.try_pop_back(&out)){
+            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+        }  
+    }
+    cout<<endl;
+    // mq.remove(12020);
+    mq.push(2100); 
+    mq.push(20100); 
+
+    for(int i=0;i<210;i++){
+        if(mq.try_pop_back(&out)){
+            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+        }  
+    }
+    cout<<endl;
+
+
+    // - remove the only element
+
+    // MapQueue<int> mq;
+
+    // mq.push(21);
+    // mq.remove(21);
+    // mq.push(122);
+    // mq.push(102); 
+    // mq.push(100);
+
+
+    // int out;
+    // for(int i=0;i<3;i++){
+    //     if(mq.try_pop(&out)){
+    //         cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+    //     }
+        
+    // }
+
+
+
+
+
+
+
+
+
+
+
+
+
+    // mq.push(211);
+    // mq.push(31);
+    // mq.push(21);
+
+    // // int n = mq.nNodes;
+    // int out;
+    // for(int i=0;i<2;i++){
+    //     if(mq.try_pop(&out)){
+    //         cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+    //     }
+        
+    // }
+    // cout<<endl;
+
+
+    // mq.push(10);
+    // mq.push(56);
+    // mq.push(12);
+    // mq.push(120);
+    // mq.push(1200);
+
+    // for(int i=0;i<3;i++){
+    //     if(mq.try_pop(&out)){
+    //         cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+    //     }
+        
+    // }
+    // cout<<endl;
+
+    // mq.remove(31);
+    // mq.remove(120);
+    // mq.push(30);
+
+    // if(!mq.is_inside(31)){
+    //     cout<<"not inside"<<endl;
+    // }
+
+    // if(mq.is_inside(1200)){
+    //     cout<<"is inside"<<endl;
+    // }
+
+    // // mq.remove(10);
+    // // mq.try_pop(&out);
+    // mq.push(1000);
 
     // int n = mq.nNodes;
-    int out;
-    for(int i=0;i<2;i++){
-        if(mq.try_pop(&out)){
-            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
-        }
+    // for(int i=0;i<n;i++){
+    //     if(mq.try_pop(&out)){
+    //         cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
+    //     }
         
-    }
-    cout<<endl;
-
-
-    mq.push(10);
-    mq.push(56);
-    mq.push(12);
-    mq.push(120);
-    mq.push(1200);
-
-    for(int i=0;i<3;i++){
-        if(mq.try_pop(&out)){
-            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
-        }
-        
-    }
-    cout<<endl;
-
-    mq.remove(31);
-    mq.remove(120);
-    mq.push(30);
-
-    // mq.remove(10);
-    // mq.try_pop(&out);
-    mq.push(1000);
-
-    int n = mq.nNodes;
-    for(int i=0;i<n;i++){
-        if(mq.try_pop(&out)){
-            cout<<"out: "<<out<<", nNodes:"<<mq.nNodes<<endl;
-        }
-        
-    }
-    cout<<endl;
+    // }
+    // cout<<endl;
 
 
 
