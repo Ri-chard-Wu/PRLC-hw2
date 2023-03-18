@@ -142,7 +142,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_JOB_CANCEL 1
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
-#define BUF_SIZE_JOB_UPLOAD 10000
+#define BUF_SIZE_JOB_UPLOAD 5000
 // #define BUF_SIZE_JOB_ASSIGN 1000
 
 typedef int jobIdx_t;
@@ -323,7 +323,7 @@ class ThreadManager{
                     jcb.result /= (double)(nTskPerJob);
                     jcb.result *= 255.0;                     
                     jobDoneQueue.push(jcb);
-                    jobCtrlTbl.erase(jobIdx);
+                    // jobCtrlTbl.erase(jobIdx);
                 }
                 else if(jcb.n < nTskPerJob){
                     jobCtrlTbl[jobIdx] = jcb;
@@ -516,6 +516,10 @@ class ProcessManager{
             s = nStaticJobs * pid;
             if(pid < worldSize - 1){e = nStaticJobs * (pid + 1) - 1;}
             else if(pid == worldSize - 1){e = tmPtr->nTotalJobs - 1;}
+            else{
+                fprintf(stderr, "[proc 0][init_job_enqueue()] Invalid pid: %d\n", pid);
+                exit(1);                
+            }
             
             for(int jobIdx = s; jobIdx <= e; jobIdx++){
                 enqueue_job(pid, jobIdx);
@@ -547,14 +551,13 @@ class ProcessManager{
                 tmPtr->one_task();                 
             }
             
-            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.1 * nStaticTsks){
+            // while(tmPtr->tskDoneQueue.unsafe_size() >= 100000){
 
-                tmPtr->aggregate_tasks();
+            //     tmPtr->aggregate_tasks();
 
-                while(tmPtr->jobDoneQueue.size() >= 0.1 * nStaticJobs){
-                    local_receive_completed_jobs();
-                } 
-            }
+            //     local_receive_completed_jobs();
+                
+            // }
 
             receive_completed_jobs();
         }  
@@ -631,7 +634,10 @@ class ProcessManager{
             nJobsCmpltd += ofst;
             // fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n", rank, ofst);  
             fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
-            rank, nJobsCmpltd);             
+            rank, nJobsCmpltd);   
+
+            fprintf(stderr, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
+            rank, nJobsCmpltd);                                   
         }
         
 
@@ -660,6 +666,9 @@ class ProcessManager{
             recvCnt[pid] += recvSz;
             
             fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
+            rank, pid, recvCnt[pid]/2); 
+
+            fprintf(stderr, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
             rank, pid, recvCnt[pid]/2); 
 
             for(int k = 0; k < recvSz; k += 2){
@@ -727,8 +736,9 @@ class ProcessManager{
         JobNode *curPtr = jobNodeTbl[jobIdx];
 
         if(!curPtr){
-            fprintf(stderr, "[proc %d][unqueue_job()] !curPtr. jobIdx: %d\n", rank,  jobIdx);
-            exit(1);
+            fprintf(stderr, "[proc %d][unqueue_job()] !curPtr. pid: %d, jobIdx: %d\n", rank, pid, jobIdx);
+            // exit(1);
+            return;
         }
 
         JobNode *fNdPtr, *bNdPtr;
@@ -882,7 +892,7 @@ class ProcessManager{
 
 
 
-class Process{ 
+class Process{
     public:
     
     Process(char** argv, int rank, int worldSize){
@@ -929,11 +939,14 @@ class Process{
                 tmPtr->one_task();                 
             }
             
-            while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
+            // while(tmPtr->tskDoneQueue.unsafe_size() >= 0.01 * nStaticTsks){
+            while(tmPtr->tskDoneQueue.unsafe_size() >= 10000){
                 tmPtr->aggregate_tasks();
-                while(tmPtr->jobDoneQueue.size() >= 0.01 * nStaticJobs){
-                    upload_completed_jobs();
-                }                  
+                // while(tmPtr->jobDoneQueue.size() >= 0.01 * nStaticJobs){
+                // while(tmPtr->jobDoneQueue.size() >= 2500){
+                upload_completed_jobs();
+                
+                // }                  
             }
 
             // print_queue_sizes();
@@ -948,15 +961,11 @@ class Process{
         }
   
 
+
+
         fprintf(stderr, "[proc %d][start] a\n", rank);
         MPI_Finalize();
         fprintf(stderr, "[proc %d][start] b\n", rank);
-        return;
-        
-
-        // fprintf(stderr, "[proc %d][start] a\n", rank);
-        // MPI_Finalize();
-        // fprintf(stderr, "[proc %d][start] b\n", rank);
 
         // check_enqueue_job_assignment();
         // check_receive_terminate_signal();
@@ -966,14 +975,6 @@ class Process{
 
 
 
-    // void print_progress(int period){
-    //     static int cnt=0;
-    //     cnt++;
-    //     if(!(cnt%period)){
-    //         printf("rendering...%5.2lf%%\r", 
-    //         (tmPtr->tskQueue.unsafe_size() / (tmPtr->nTotalJobs * tmPtr->nTskPerJob * 1.)) * 100.);
-    //     }
-    // }
 
 
     void static_job2task(){
@@ -1064,7 +1065,7 @@ class Process{
             jobDoneBuf[ofst++] = (((int)jcb.result.r) << 24) | (((int)jcb.result.g) << 16) | 
                 (((int)jcb.result.b) << 8) | ((int)255);       
 
-            if(ofst >= jobDoneBufSz-2)break;
+            if(ofst >= jobDoneBufSz)break;
         }
 
         if(ofst > 0){
@@ -1097,6 +1098,9 @@ class Process{
     int nJobsUploaded;  
     
 };    
+
+
+
 
 
 void write_png(ProcessManager* pm){

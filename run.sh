@@ -8,7 +8,7 @@ cd ~/hw2/
 make clean; make 2> make-stderr.out
 RunFile=./hw2
 
-source ./testcases/07.txt
+source ./testcases/06.txt
 
 
 
