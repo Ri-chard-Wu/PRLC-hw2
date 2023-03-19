@@ -143,7 +143,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 #define MPI_TAG_TERMINATE 2
 #define MPI_TAG_JOB_UPLOAD 3
 
-#define BUF_SIZE_JOB_UPLOAD 5000
+#define BUF_SIZE_JOB_UPLOAD 10000
 #define BUF_SIZE_JOB_SCHDL 5000
 
 typedef int jobIdx_t;
@@ -232,11 +232,11 @@ class MapQueue{
     }
 
 
-    void remove(Ket_t key){
+    bool remove(Ket_t key){
 
         if(!is_inside(key)){
-            fprintf(stderr, "[MapQueue::remove()] key not found: %d\n", key);
-            return;
+            // fprintf(stderr, "[MapQueue::remove()] key not found: %d\n", key);
+            return false;
         }
 
 
@@ -289,6 +289,8 @@ class MapQueue{
             nodeTbl.erase(key);
             nNodes--;
         }
+
+        return true;
     }
 
     struct Node{
@@ -399,12 +401,14 @@ class ThreadManager{
     void job(int tid){
 
         Job job;
-        job.result = vec4(0.);
 
         while(1){
             if(!jobQueue.empty()){
 
-                if(!jobQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
+                if(!jobQueue.try_pop(job)){
+                    fprintf(stderr, "[pid %d][job()] pop failed.\n", rank);
+                    continue;
+                }
 
                 int i, j;
             
@@ -415,7 +419,7 @@ class ThreadManager{
                 for (int m = 0; m < AA; ++m) {
                     for (int n = 0; n < AA; ++n) {
                         
-                        job.result += partial_AA(i, j, m, n);;
+                        job.result += partial_AA(i, j, m, n);
                     }
                 }       
  
@@ -434,11 +438,13 @@ class ThreadManager{
     void one_job(){
 
         Job job;
-        job.result = vec4(0.);
     
         if(!jobQueue.empty()){
-            if(!jobQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
-
+            if(!jobQueue.try_pop(job)){
+                fprintf(stderr, "[pid %d][one_job()] pop failed.\n", rank);
+                return;
+            }
+            
             int i, j;
         
             jobIdx2ImgCoord(job.idx, &i, &j);
@@ -448,7 +454,7 @@ class ThreadManager{
             for (int m = 0; m < AA; ++m) {
                 for (int n = 0; n < AA; ++n) {
                     
-                    job.result += partial_AA(i, j, m, n);;
+                    job.result += partial_AA(i, j, m, n);
                 }
             } 
             
@@ -659,7 +665,7 @@ class ProcessManager{
     void dynamic_job_enqueue(){
         if(dynamicJobQueue.empty()) return;
 
-        // static int cnt=startIdx;
+        static int cnt=startIdx;
 
         if(tmPtr->jobQueue.unsafe_size() < 10 * tmPtr->nThrds){
             for(int i=0; i < 10 * tmPtr->nThrds; i++){
@@ -671,8 +677,9 @@ class ProcessManager{
                     Job job;
                     job.idx = jobIdx;
 
-                    // assert(jobIdx == cnt);
-                    // cnt++;
+                    assert(jobIdx == cnt);
+                    assert(cnt <= stopIdx);
+                    cnt++;
                     // fprintf(stderr, "[proc 0] jobIdx: %d, cnt: %d\n", jobIdx, cnt);
 
                     tmPtr->jobQueue.push(job);
@@ -703,7 +710,7 @@ class ProcessManager{
             }
 
             receive_completed_jobs();
-            dynamic_job_schedule();
+            // dynamic_job_schedule();
 
             dynamic_job_enqueue();
         }  
@@ -718,26 +725,38 @@ class ProcessManager{
         int ofst = 0, i, j; 
 
         while(!tmPtr->jobDoneQueue.empty()){
-            if(!tmPtr->jobDoneQueue.try_pop(job)){fprintf(stderr, "[upload_completed_jobs()]\
-                                                     pop failed.\n");}
+            if(!tmPtr->jobDoneQueue.try_pop(job)){
+                fprintf(stderr, "[local_receive_completed_jobs()] pop failed.\n");
+                return;
+            }
 
-            
+            // if(!pcb_remove_job(0, job.idx)) ;
+
             tmPtr->jobIdx2ImgCoord(job.idx, &i, &j);
 
+            if(!pcb_remove_job(0, job.idx)){
+
+                fprintf(stderr, "[proc %d] Already in image[]: jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
+            rank, job.idx, i, j, image[i][4 * j + 0], image[i][4 * j + 1], image[i][4 * j + 2]); 
+                
+                fprintf(stderr, "[proc %d] duplicate done data: jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
+            rank, job.idx, i, j, (int)job.result.r, (int)job.result.g, (int)job.result.b); 
+                continue;
+            }
+            
             image[i][4 * j + 0] = (unsigned char)job.result.r;  
             image[i][4 * j + 1] = (unsigned char)job.result.g;  
             image[i][4 * j + 2] = (unsigned char)job.result.b;  
             image[i][4 * j + 3] = (unsigned char)255;  
 
-            pcb_remove_job(0, job.idx);
             ofst++;
-         
         }
+
         
         if(ofst > 0){
             nJobsCmpltd += ofst;
 
-            fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid 0 recvSz: %d\n",
+            fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n",
             rank, nJobsCmpltd);                                     
         }
     }
@@ -772,9 +791,19 @@ class ProcessManager{
             for(int k = 0; k < recvSz; k += 2){
 
                 jobIdx = jobDoneBuf[k];
+
                 tmPtr->jobIdx2ImgCoord(jobIdx, &i, &j);
                 data = jobDoneBuf[k+1];
+               
+                if(!pcb_remove_job(pid, jobIdx)){
 
+                    fprintf(stderr, "[proc %d] pid %d, Already in image[]: jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
+              rank, pid, jobIdx, i, j, image[i][4 * j + 0], image[i][4 * j + 1], image[i][4 * j + 2]); 
+                    
+                    fprintf(stderr, "[proc %d] pid %d, duplicate done data: jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
+              rank, pid, jobIdx, i, j, (data >> 24) & dataMask, ((data >> 16) & dataMask), ((data >> 8 ) & dataMask)); 
+                    continue;
+                }
         //         fprintf(stderr, "[proc %d][receive_completed_jobs()] jobIdx: %d, i: %d, j: %d, data: (%d, %d, %d).\n", 
         //   rank, jobIdx, i, j, (data >> 24) & dataMask, ((data >> 16) & dataMask), ((data >> 8 ) & dataMask)); 
 
@@ -789,20 +818,20 @@ class ProcessManager{
                     exit(1);
                 }
 
-                pcb_remove_job(pid, jobIdx);
+                // pcb_remove_job(pid, jobIdx);
 
             }
         }
     }
 
 
-    void pcb_pop_front_job(int pid, int* jobIdx){
-        procCtrlTbl[pid].jobQueue.try_pop_front(jobIdx);
+    bool pcb_pop_front_job(int pid, int* jobIdx){
+        return procCtrlTbl[pid].jobQueue.try_pop_front(jobIdx);
     }
 
 
-    void pcb_pop_back_job(int pid, int* jobIdx){
-        procCtrlTbl[pid].jobQueue.try_pop_back(jobIdx);
+    bool pcb_pop_back_job(int pid, int* jobIdx){
+        return procCtrlTbl[pid].jobQueue.try_pop_back(jobIdx);
     }
 
 
@@ -812,8 +841,14 @@ class ProcessManager{
     }
 
 
-    void pcb_remove_job(int pid, jobIdx_t jobIdx){
-        procCtrlTbl[pid].jobQueue.remove(jobIdx);
+    bool pcb_remove_job(int pid, jobIdx_t jobIdx){
+        
+        if(!procCtrlTbl[pid].jobQueue.remove(jobIdx)){
+            fprintf(stderr, "[pid %d][pcb_remove_job()] jobIdx not found: %d\n", pid, jobIdx);
+            return false;
+        }
+        return true;
+        
     }
 
     
@@ -846,7 +881,7 @@ class ProcessManager{
             
             for(int i=0; i < BUF_SIZE_JOB_SCHDL; i++){
                 
-                pcb_pop_back_job(maxNJobPid, &jobIdx);
+                if(!pcb_pop_back_job(maxNJobPid, &jobIdx)){break;}
                 pcb_push_back_job(minNJobPid, jobIdx);
                 
                 jobSchdlBuf[i] = jobIdx;
@@ -895,7 +930,7 @@ class ProcessManager{
 
         // print_proc_nJob();
 
-        for(int pid = 1; pid < worldSize; pid++){
+        for(int pid = 0; pid < worldSize; pid++){
             if(procCtrlTbl[pid].jobQueue.size()) return false;
         }
 
@@ -965,7 +1000,7 @@ class Process{
     void dynamic_job_enqueue(){
         if(dynamicJobQueue.empty()) return;
 
-        // static int cnt=startIdx;
+        static int cnt=startIdx;
 
         if(tmPtr->jobQueue.unsafe_size() < 10 * tmPtr->nThrds){
             for(int i=0; i < 10 * tmPtr->nThrds; i++){
@@ -977,8 +1012,9 @@ class Process{
                     Job job;
                     job.idx = jobIdx;
 
-                    // assert(jobIdx == cnt);
-                    // cnt++;
+                    assert(jobIdx == cnt);
+                    assert(cnt <= stopIdx);
+                    cnt++;
                     // fprintf(stderr, "[proc %d] jobIdx: %d, cnt: %d\n", rank, jobIdx, cnt);
 
                     tmPtr->jobQueue.push(job);
@@ -1013,8 +1049,8 @@ class Process{
                 check_receive_terminate_signal();
             }
 
-            dynamic_job_cancel();
-            dynamic_job_receive();
+            // dynamic_job_cancel();
+            // dynamic_job_receive();
         
             dynamic_job_enqueue();
             // fprintf(stderr, "[proc %d][start_process()] jobQueue size: %d\n",
@@ -1096,14 +1132,19 @@ class Process{
         int ofst = 0; 
 
         while(!tmPtr->jobDoneQueue.empty()){
-            if(!tmPtr->jobDoneQueue.try_pop(job)){fprintf(stderr, "[task()] pop failed.\n");}
+            if(!tmPtr->jobDoneQueue.try_pop(job)){
+                fprintf(stderr, "[pid %d][upload_completed_jobs()] pop failed.\n", rank);
+                break;
+            }
 
         //     fprintf(stderr, "[proc %d][upload_completed_jobs()] jobIdx: %d, data: (%f, %f, %f).\n", 
         //   rank, job.idx, job.result.r, job.result.g, job.result.b); 
 
             jobDoneBuf[ofst++] = job.idx;
-            jobDoneBuf[ofst++] = (((int)job.result.r) << 24) | (((int)job.result.g) << 16) | 
-                (((int)job.result.b) << 8) | ((int)255);       
+            jobDoneBuf[ofst++] = (((int)((unsigned char)job.result.r)) << 24) | \
+                                 (((int)((unsigned char)job.result.g)) << 16) | \
+                                 (((int)((unsigned char)job.result.b)) <<  8) | \
+                                 ((int)255);       
 
             if(ofst >= BUF_SIZE_JOB_UPLOAD) break;
         }

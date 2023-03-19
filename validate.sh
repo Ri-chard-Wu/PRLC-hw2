@@ -16,7 +16,7 @@ echo "==================================="
 
 if [ -f "$RunFile" ]; then
 
-    for i in {1..6}
+    for i in {7..8} #{1..6}
     do
         echo -n "validating 0$i..."
 
@@ -24,7 +24,7 @@ if [ -f "$RunFile" ]; then
         num_threads=${c}
         outFile=out.png
 
-        srun -N ${N} -n ${n} -c ${c} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out 1> run-stdout.out
+        srun -N ${N} -n ${n} -c ${c} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out
         ./hw2-diff $outFile $valid
 
 
