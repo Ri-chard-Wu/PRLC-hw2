@@ -1,3 +1,15 @@
 [proc 0][init_procCtrlTbl()] after init, proc njob:
 262144, 262144, 262144, 262144, 
-[pid 3][job()] pop failed.
+
+[check_receive_terminate_signal()][proc 1] receive                                         terminate signal. Terminating...
+
+
+[check_receive_terminate_signal()][
+[check_receive_terminate_signal()][proc 1] receive                                         terminate signal. Terminating...
+
+
+[check_receive_terminate_signal()][proc 2] receive                                         terminate signal. Terminating...
+
+
+[check_receive_terminate_signal()][proc 3] receive                                         terminate signal. Terminating...
+

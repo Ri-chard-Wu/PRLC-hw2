@@ -928,7 +928,6 @@ class ProcessManager{
 
     bool check_send_terminate_signal(){
 
-        // print_proc_nJob();
 
         for(int pid = 0; pid < worldSize; pid++){
             if(procCtrlTbl[pid].jobQueue.size()) return false;
@@ -939,7 +938,7 @@ class ProcessManager{
             MPI_Send(&sigBuf, 1, MPI_INT, pid, MPI_TAG_TERMINATE, MPI_COMM_WORLD);
         }
         return true;
-    }
+    } 
 
 
 
