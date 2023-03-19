@@ -363,9 +363,9 @@ class ThreadManager{
         nTotalJobs = width * height;
         nThrds = num_threads - 1;
 
-        // for(int i=0;i<num_threads;i++){
-        //     jobTimeTbl[i] = 0;
-        // }
+        for(int i=0;i<num_threads;i++){
+            jobTimeTbl[i] = 0;
+        }
    
     }
 
@@ -452,7 +452,7 @@ class ThreadManager{
                 // cerr<<"[pid "<< rank <<", tid: "<< tid <<"] dt: "<<duration.count()<<" us"<<endl;
                 // fprintf(stderr, "[pid %d, tid: %d] fprintf(): dt: %d us\n", rank, tid, (int)duration.count());
 
-                // jobTimeTbl[tid] += (int)duration.count();
+                jobTimeTbl[tid] += (int)duration.count();
 
             }
         }
@@ -494,7 +494,7 @@ class ThreadManager{
             auto stop = high_resolution_clock::now();
             auto duration = duration_cast<microseconds>(stop - start);
             
-            // jobTimeTbl[num_threads - 1] += (int)duration.count();
+            jobTimeTbl[num_threads - 1] += (int)duration.count();
             
     
             jobDoneQueue.push(job);
@@ -587,7 +587,7 @@ class ThreadManager{
 
     int rank, worldSize;
 
-    // concurrent_unordered_map<int, int> jobTimeTbl;
+    concurrent_unordered_map<int, int> jobTimeTbl;
     concurrent_queue<Job> jobQueue;
     concurrent_queue<Job> jobDoneQueue;
 
@@ -662,10 +662,10 @@ class ProcessManager{
         
 
 
-        // loadDistTbl = new int*[worldSize];
-        // for(int i=0;i<worldSize;i++){
-        //     loadDistTbl[i] = new int[loadDistLen];
-        // }
+        loadDistTbl = new int*[worldSize];
+        for(int i=0;i<worldSize;i++){
+            loadDistTbl[i] = new int[loadDistLen];
+        }
 
         // for(int i=0;i<worldSize;i++){
         //     for(int j=0;j<loadDistLen;j++){
@@ -751,7 +751,7 @@ class ProcessManager{
             dynamic_job_schedule();
             dynamic_job_enqueue(); // if true: 24 us.
 
-            // probe_load_distribution();
+            probe_load_distribution();
         }  
     }
     
@@ -759,54 +759,54 @@ class ProcessManager{
 
 
 
-    // int loadDistLen = 100000;
-    // int **loadDistTbl;
-    // int loadDist_ofst=0;
+    int loadDistLen = 100000;
+    int **loadDistTbl;
+    int loadDist_ofst=0;
 
-    // void probe_load_distribution(){
+    void probe_load_distribution(){
 
-    //     loadDist_ofst++;
-    //     if(loadDist_ofst >= loadDistLen){
-    //         fprintf(stdout, \
-    //          "[probe_load_distribution()] Warning: loadDist_ofst >= loadDistLen\n");
-    //     } 
-    //     else{
-    //         for(int i=0;i<worldSize;i++){
-    //             loadDistTbl[i][loadDist_ofst] = procCtrlTbl[i].jobQueue.size();
-    //         }
-    //     }
-    // }
+        loadDist_ofst++;
+        if(loadDist_ofst >= loadDistLen){
+            fprintf(stdout, \
+             "[probe_load_distribution()] Warning: loadDist_ofst >= loadDistLen\n");
+        } 
+        else{
+            for(int i=0;i<worldSize;i++){
+                loadDistTbl[i][loadDist_ofst] = procCtrlTbl[i].jobQueue.size();
+            }
+        }
+    }
 
 
 
-    // void print_stat(){
+    void print_stat(){
         
-    //     // ofstream outfile;
-    //     // string outfileName = "jobTime" + to_string(rank) + ".txt";        
-    //     // outfile.open (outfileName);
+        // ofstream outfile;
+        // string outfileName = "jobTime" + to_string(rank) + ".txt";        
+        // outfile.open (outfileName);
 
-    //     // for(int i=0;i<tmPtr->num_threads;i++){
-    //     //     outfile << "[print_stat()] jobTimeTbl[" << i << "]: " << tmPtr->jobTimeTbl[i] << "\n"; 
-    //     // }
+        // for(int i=0;i<tmPtr->num_threads;i++){
+        //     outfile << "[print_stat()] jobTimeTbl[" << i << "]: " << tmPtr->jobTimeTbl[i] << "\n"; 
+        // }
         
-    //     // outfile.close();
-    //     fprintf(stdout, "[print_stat()] loadDist_ofst: %d\n", loadDist_ofst);
+        // outfile.close();
+        fprintf(stdout, "[print_stat()] loadDist_ofst: %d\n", loadDist_ofst);
 
-    //     ofstream outfile;
-    //     string outfileName;
+        ofstream outfile;
+        string outfileName;
 
-    //     for(int i=0; i < worldSize; i++){
+        for(int i=0; i < worldSize; i++){
             
-    //         outfileName = "loadDist_pid" + to_string(i) + ".txt";  
-    //         outfile.open(outfileName);
+            outfileName = "loadDist_pid" + to_string(i) + ".txt";  
+            outfile.open(outfileName);
 
-    //         for(int j=0; j < loadDist_ofst; j++){
-    //             outfile << loadDistTbl[i][j] << "\n"; 
-    //         }
+            for(int j=0; j < loadDist_ofst; j++){
+                outfile << loadDistTbl[i][j] << "\n"; 
+            }
 
-    //         outfile.close();
-    //     }
-    // }
+            outfile.close();
+        }
+    }
 
 
 
@@ -1039,7 +1039,7 @@ class ProcessManager{
             MPI_Send(&sigBuf, 1, MPI_INT, pid, MPI_TAG_TERMINATE, MPI_COMM_WORLD);
         }
 
-        // print_stat();
+        print_stat();
 
         return true;
     } 
@@ -1275,24 +1275,24 @@ class Process{
         if(terminate){
             fprintf(stderr, "\n[check_receive_terminate_signal()][proc %d] \
             receive terminate signal. Terminating...\n\n", rank);
-            // print_stat();
+            print_stat();
             exit(0);
         }
     }
 
 
-    // void print_stat(){
+    void print_stat(){
         
-    //     ofstream outfile;
-    //     string outfileName = "jobTime" + to_string(rank) + ".txt";        
-    //     outfile.open (outfileName);
+        ofstream outfile;
+        string outfileName = "jobTime" + to_string(rank) + ".txt";        
+        outfile.open (outfileName);
 
-    //     for(int i=0;i<tmPtr->num_threads;i++){
-    //         outfile << "[print_stat()] jobTimeTbl[" << i << "]: " << tmPtr->jobTimeTbl[i] << "\n"; 
-    //     }
+        for(int i=0;i<tmPtr->num_threads;i++){
+            outfile << "[print_stat()] jobTimeTbl[" << i << "]: " << tmPtr->jobTimeTbl[i] << "\n"; 
+        }
         
-    //     outfile.close();
-    // }
+        outfile.close();
+    }
 
 
 

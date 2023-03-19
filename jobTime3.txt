@@ -1,0 +1,12 @@
+[print_stat()] jobTimeTbl[0]: 12643722
+[print_stat()] jobTimeTbl[1]: 12643854
+[print_stat()] jobTimeTbl[2]: 12643322
+[print_stat()] jobTimeTbl[3]: 12643888
+[print_stat()] jobTimeTbl[4]: 12642754
+[print_stat()] jobTimeTbl[5]: 12643481
+[print_stat()] jobTimeTbl[6]: 12642954
+[print_stat()] jobTimeTbl[7]: 12642836
+[print_stat()] jobTimeTbl[8]: 12641994
+[print_stat()] jobTimeTbl[9]: 12642802
+[print_stat()] jobTimeTbl[10]: 12641705
+[print_stat()] jobTimeTbl[11]: 12542311
