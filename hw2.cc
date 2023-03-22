@@ -18,6 +18,13 @@
 #include <fstream>
 #include <string>
 
+
+#ifdef __SSE2__
+  #include <emmintrin.h>
+#else
+  #warning SSE2 support is not available. Code will not compile
+#endif
+
 using namespace std::chrono;
 using namespace std;
 using namespace oneapi::tbb;
@@ -79,6 +86,90 @@ double md(vec3 p, double& trap) {
 }
 
 
+double md2(vec3 p0, vec3 p1, double& trap) {
+
+    __m128d vx2 = _mm_set_pd(p0.x, p1.x);
+    __m128d vy2 = _mm_set_pd(p0.y, p1.y);
+    __m128d vz2 = _mm_set_pd(p0.z, p1.z);
+
+    // double dr = 1.;
+    __m128d dr2 = _mm_set1_pd(1.)
+    double buf_pd[2];           
+
+    __m128d r2 = _mm_set_pd(glm::length(p0), glm::length(p1));
+
+    trap = r; // ?
+
+    for (int i = 0; i < md_iter; ++i) {
+
+        __m128d vy_over_vx = _mm_div_pd(vy2, vx2);
+
+        _mm_storeu_pd(buf_pd, vy_over_vx);    
+        __m128d atrig2 = _mm_set_pd(glm::atan(buf_pd[1]), glm::atan(buf_pd[0]));
+        __m128d power2 = _mm_set_pd(power, power);
+        __m128d theta2 = _mm_mul_pd(atrig2, power2);
+
+        // double phi = glm::asin(v.z / r) * power;
+        _mm_storeu_pd(buf_pd, theta2);    
+        atrig2 = _mm_set_pd(glm::asin(buf_pd[1]), glm::asin(buf_pd[0]));
+        __m128d phi2 = _mm_mul_pd(atrig2, power2);
+
+
+        // dr = power * glm::pow(r, power - 1.) * dr + 1.;
+        _mm_storeu_pd(buf_pd, r2);   
+        __m128d pow2 = _mm_set_pd(glm::pow(buf_pd[1], power - 1.), glm::pow(buf_pd[0], power - 1.));
+        dr2 = _mm_add_pd(_mm_mul_pd(_mm_mul_pd(power2, pow2), dr2), _mm_set1_pd(1.));
+
+
+
+        // v = p + glm::pow(r, power) *
+        //             vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
+
+        _mm_storeu_pd(buf_pd, theta2);
+        __m128d cos_theta2 = _mm_set_pd(cos(buf_pd[1]), cos(buf_pd[0]));
+        __m128d sin_theta2 = _mm_set_pd(sin(buf_pd[1]), sin(buf_pd[0]));
+
+        _mm_storeu_pd(buf_pd, phi2);
+        __m128d cos_phi2 = _mm_set_pd(cos(buf_pd[1]), cos(buf_pd[0]));
+        
+        __m128d vec3x2 = _mm_mul_pd(cos_theta2, cos_phi2);
+        __m128d vec3y2 = _mm_mul_pd(cos_phi2, sin_theta2);
+        __m128d vec3z2 = _mm_set_pd(-sin(buf_pd[1]), -sin(buf_pd[0]));
+
+        pow2 = _mm_mul_pd(pow2, r2);
+        vx2 = _mm_add_pd(px2, _mm_mul_pd(pow2, vec3x2));
+        vy2 = _mm_add_pd(py2, _mm_mul_pd(pow2, vec3y2));
+        vz2 = _mm_add_pd(pz2, _mm_mul_pd(pow2, vec3z2));
+
+
+
+        trap = glm::min(trap, r);
+
+        r = glm::length(v);      
+        if (r > bailout) break;  
+
+    }
+
+    return 0.5 * log(r) * r / dr;  
+
+}
+
+double map2(vec3 p0, vec3 p1, double& trap, int& ID) {
+    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
+
+    vec3 rp0 = mat3(1.,   0.,    0.,
+                   0., rt.x, -rt.y, 
+                   0., rt.y,  rt.x) * p0;  
+
+    vec3 rp1 = mat3(1.,   0.,    0.,
+                   0., rt.x, -rt.y, 
+                   0., rt.y,  rt.x) * p1;  
+
+    ID = 1;
+    return md2(rp0, rp1, trap);
+}
+
+
 double map(vec3 p, double& trap, int& ID) {
     vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
 
@@ -125,13 +216,15 @@ vec3 calcNor(vec3 p) {
 }
 
 
-double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
+double trace(vec3 ro, vec3 rd0, vec3 rd1, double& trap, int& ID) {
     double t = 0;    
     double len = 0;  
 
     for (int i = 0; i < ray_step; ++i) {
 
-        len = map(ro + rd * t, trap, ID);  
+        len = map2(ro + rd0 * t, ro + rd1 * t, trap, ID);  
+        // len = map(ro + rd * t, trap, ID);  
+
         if (glm::abs(len) < eps || t > far_plane) break;
         t += len * ray_multiplier;
     }
@@ -522,26 +615,43 @@ class ThreadManager{
     }
 
 
-    vec4 partial_AA(int i, int j, int m, int n){
+
+    vec4 partial_AA(int i, int j, int m){
+
+        
 
         vec2 iResolution = vec2(width, height);
 
-        vec2 p = vec2(j, i) + vec2(m, n) / (double)AA;
+        vec2 p0 = vec2(j, i) + vec2(m, 0.) / (double)AA;
+        vec2 p1 = vec2(j, i) + vec2(m, 1.) / (double)AA;
 
-        vec2 uv = (-iResolution.xy() + 2. * p) / iResolution.y;
-        uv.y *= -1;  
+        vec2 uv0 = (-iResolution.xy() + 2. * p0) / iResolution.y;
+        vec2 uv1 = (-iResolution.xy() + 2. * p1) / iResolution.y;
+
+        uv0.y *= -1;  
+        uv1.y *= -1; 
 
         vec3 ro = camera_pos;               
         vec3 ta = target_pos;               
         vec3 cf = glm::normalize(ta - ro);  
         vec3 cs = glm::normalize(glm::cross(cf, vec3(0., 1., 0.))); 
-        vec3 cu = glm::normalize(glm::cross(cs, cf));               
-        vec3 rd = glm::normalize(uv.x * cs + uv.y * cu + FOV * cf); 
+        vec3 cu = glm::normalize(glm::cross(cs, cf));     
+
+        vec3 rd0 = glm::normalize(uv0.x * cs + uv0.y * cu + FOV * cf); 
+        vec3 rd1 = glm::normalize(uv1.x * cs + uv1.y * cu + FOV * cf); 
         
+
         double trap;  
-        int objID;    
-        double d = trace(ro, rd, trap, objID); // dependent loop, 10000 * 24
+        int objID;  
+
+
+
+        double d = trace(ro, rd0, rd1, trap, objID); // dependent loop, 10000 * 24
         
+
+        
+
+
         vec3 col(0.);                          
         vec3 sd = glm::normalize(camera_pos);  
         vec3 sc = vec3(1., .9, .717);          
@@ -886,7 +996,7 @@ class ProcessManager{
 
             recvCnt[pid] += recvSz;
             
-            fprintf(stdout, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
+            fprintf(stderr, "[proc %d][receive_completed_jobs()] from pid %d recvSz: %d\n",
             rank, pid, recvCnt[pid]/2); 
 
             
@@ -1316,15 +1426,12 @@ class Process{
 
 void write_png(ProcessManager* pm){
 
-    fprintf(stdout, "[write_png()] a\n");
 
     unsigned error = lodepng_encode32_file(pm->filename, pm->raw_image, pm->tmPtr->width, pm->tmPtr->height);
 
-    fprintf(stdout, "[write_png()] b\n");
 
     if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
 
-    fprintf(stdout, "[write_png()] c\n");
 }
 
 
@@ -1346,12 +1453,10 @@ int main(int argc, char** argv) {
         ProcessManager pm(argv, rank, worldSize);
         pm.start_process();
 
-        fprintf(stdout, "[proc %d][main()] b\n", rank);
 
         // pm.write_png();
         write_png(&pm);
 
-        fprintf(stdout, "[proc %d][main()] c\n", rank);
     }
     else{
         Process proc(argv, rank, worldSize);
@@ -1359,7 +1464,6 @@ int main(int argc, char** argv) {
         
     }
 
-    fprintf(stdout, "[proc %d][main()] d\n", rank);
 
    
 

@@ -1,9 +1,15 @@
 
 cd ~/hw2/tests
 
-make clean
-make 2> make-stderr.out
-FILE=./test
+# make clean
+# make 2> make-stderr.out
+# FILE=./test
+
+
+rm sse
+g++ -O2 -msse2 --std=c++14 sse.cc -o sse
+FILE=./sse
+
 
 
 

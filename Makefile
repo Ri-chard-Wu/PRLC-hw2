@@ -9,10 +9,13 @@ LODEPNG = /home/ipc23/share/hw2/lodepng/lodepng.cpp
 
 all: $(TARGET)
 
-
 $(TARGET): $(HW2) $(LODEPNG)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) $(HW2) $(LODEPNG) -o $(TARGET)
 
 .PHONY: clean
 clean:
 	rm -r hw2	
+
+
+
+

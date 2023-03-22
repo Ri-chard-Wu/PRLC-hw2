@@ -16,7 +16,7 @@ echo "==================================="
 
 if [ -f "$RunFile" ]; then
 
-    for i in {7..8} #{1..6}
+    for i in {1..8} #{1..6}
     do
         echo -n "validating 0$i..."
 
