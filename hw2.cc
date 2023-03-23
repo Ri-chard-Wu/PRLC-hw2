@@ -18,13 +18,6 @@
 #include <fstream>
 #include <string>
 
-
-#ifdef __SSE2__
-  #include <emmintrin.h>
-#else
-  #warning SSE2 support is not available. Code will not compile
-#endif
-
 using namespace std::chrono;
 using namespace std;
 using namespace oneapi::tbb;
@@ -60,6 +53,10 @@ void write_png(const char* filename, unsigned char* raw_image, unsigned int widt
 
 
 double md(vec3 p, double& trap) {
+
+    double buf_pd[2];
+    __m128d oprn1, oprn2;
+
     vec3 v = p;
     double dr = 1.;            
     double r = glm::length(v); 
@@ -67,10 +64,26 @@ double md(vec3 p, double& trap) {
 
     for (int i = 0; i < md_iter; ++i) {
 
-        double theta = glm::atan(v.y, v.x) * power;
-        double phi = glm::asin(v.z / r) * power;
-        dr = power * glm::pow(r, power - 1.) * dr + 1.;
+        oprn1 = _mm_set_pd(v.y, v.z);
+        oprn2 = _mm_set_pd(v.x, r);
+        _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2)); 
+
+        oprn1 = _mm_set_pd(glm::atan(buf_pd[1]), glm::asin(buf_pd[0]));
+        oprn2 = _mm_set_pd(power, power);   
+        _mm_storeu_pd(buf_pd, _mm_mul_pd(oprn1, oprn2)); 
         
+        double theta = buf_pd[1];
+        double phi = buf_pd[0];
+
+
+        
+
+        dr = power * glm::pow(r, power - 1.) * dr + 1.;
+
+        // oprn1 = _mm_set_pd(, );
+        // oprn2 = _mm_set_pd(, );   
+        // _mm_storeu_pd(buf_pd, _mm_mul_pd(oprn1, oprn2)); 
+                
         v = p + glm::pow(r, power) *
                     vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
 
@@ -85,152 +98,17 @@ double md(vec3 p, double& trap) {
 
 }
 
-
-// double md(vec3 p, double& trap)
-void md2(__m128d px2, __m128d py2, __m128d pz2, __m128d* trap2, __m128d* len2) {
-
-    __m128d power2 = _mm_set_pd(power, power);
-
-    __m128d bailout2 = _mm_set1_pd(bailout);
-
-    double dr_out[2], r_out[2], buf_pd[2], buf_out[2];
-    r_out[0] = 0.;
-    r_out[1] = 0.;
-
-
-    // vec3 v = p;
-    __m128d vx2 = px2;
-    __m128d vy2 = py2;
-    __m128d vz2 = pz2;
-
-
-    // double dr = 1.;
-    __m128d dr2 = _mm_set1_pd(1.);
-
-
-    // double r = glm::length(v);
-    // trap = r;
-    __m128d vx2_sq = _mm_mul_pd(vx2, vx2);
-    __m128d vy2_sq = _mm_mul_pd(vy2, vy2);
-    __m128d vz2_sq = _mm_mul_pd(vz2, vz2);
-    __m128d r2 = _mm_sqrt_pd(_mm_add_pd(_mm_add_pd(vx2_sq, vy2_sq), vz2_sq));
-    *trap2 = r2;
-
-
-    for (int iter = 0; iter < md_iter; ++iter) {
-
-        // double theta = glm::atan(v.y, v.x) * power;
-        _mm_storeu_pd(buf_pd, _mm_div_pd(vy2, vx2));    
-        __m128d atrig2 = _mm_set_pd(glm::atan(buf_pd[1]), glm::atan(buf_pd[0]));
-        __m128d theta2 = _mm_mul_pd(atrig2, power2);
-
-        // double phi = glm::asin(v.z / r) * power;
-        _mm_storeu_pd(buf_pd, _mm_div_pd(vz2, r2));    
-        atrig2 = _mm_set_pd(glm::asin(buf_pd[1]), glm::asin(buf_pd[0]));
-        __m128d phi2 = _mm_mul_pd(atrig2, power2);
-
-        // dr = power * glm::pow(r, power - 1.) * dr + 1.;
-        _mm_storeu_pd(buf_pd, r2);   
-        __m128d pow2 = _mm_set_pd(glm::pow(buf_pd[1], power - 1.), glm::pow(buf_pd[0], power - 1.));
-        dr2 = _mm_add_pd(_mm_mul_pd(_mm_mul_pd(power2, pow2), dr2), _mm_set1_pd(1.));
-
-        // v = p + glm::pow(r, power) *
-        //             vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
-        _mm_storeu_pd(buf_pd, theta2);
-        __m128d cos_theta2 = _mm_set_pd(cos(buf_pd[1]), cos(buf_pd[0]));
-        __m128d sin_theta2 = _mm_set_pd(sin(buf_pd[1]), sin(buf_pd[0]));
-
-        _mm_storeu_pd(buf_pd, phi2);
-        __m128d cos_phi2 = _mm_set_pd(cos(buf_pd[1]), cos(buf_pd[0]));
-        
-        __m128d vec3x2 = _mm_mul_pd(cos_theta2, cos_phi2);
-        __m128d vec3y2 = _mm_mul_pd(cos_phi2, sin_theta2);
-        __m128d vec3z2 = _mm_set_pd(-sin(buf_pd[1]), -sin(buf_pd[0]));
-
-        pow2 = _mm_mul_pd(pow2, r2);
-        vx2 = _mm_add_pd(px2, _mm_mul_pd(pow2, vec3x2));
-        vy2 = _mm_add_pd(py2, _mm_mul_pd(pow2, vec3y2));
-        vz2 = _mm_add_pd(pz2, _mm_mul_pd(pow2, vec3z2));
-
-
-        // trap = glm::min(trap, r);
-        *trap2 = _mm_min_pd(*trap2, r2);
-
-
-        // r = glm::length(v);
-        vx2_sq = _mm_mul_pd(vx2, vx2);
-        vy2_sq = _mm_mul_pd(vy2, vy2);
-        vz2_sq = _mm_mul_pd(vz2, vz2);
-        r2 = _mm_sqrt_pd(_mm_add_pd(_mm_add_pd(vx2_sq, vy2_sq), vz2_sq));
+    // double buf_pd[2];
+    // __m128d oprn1, oprn2;
     
-
-        // if (r > bailout) break; 
-        _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(r2, bailout2));
-
-        int i=0;
-        if(buf_pd[1-i]){
-            if (r_out[i] <= bailout){
-
-                _mm_storeu_pd(buf_out, r2);
-                r_out[i] = buf_out[1-i];
-
-                _mm_storeu_pd(buf_out, dr2);
-                dr_out[i] = buf_out[1-i];
-
-                if (r_out[1-i] > bailout) break;
-            } 
-        }    
-
-        i = 1;
-        if(buf_pd[1-i]){
-            if (r_out[i] <= bailout){
-
-                _mm_storeu_pd(buf_out, r2);
-                r_out[i] = buf_out[1-i];
-
-                _mm_storeu_pd(buf_out, dr2);
-                dr_out[i] = buf_out[1-i];
-
-                if (r_out[1-i] > bailout) break;
-            } 
-        } 
-        
-    }
-
-
-    // return 0.5 * log(r) * r / dr;  
-    r2 = _mm_set_pd(r_out[0], r_out[1]);
-    dr2 = _mm_set_pd(dr_out[0], dr_out[1]);
-    __m128d log_r2 = _mm_set_pd(log(r_out[0]), log(r_out[1]));
-    *len2 = _mm_div_pd(_mm_mul_pd(_mm_mul_pd(_mm_set1_pd(0.5), log_r2), r2), dr2);
-}
-
-
-
-
-// double map(vec3 p, double& trap, int& ID)
-void map2(__m128d rtx2, __m128d rty2, __m128d rtz2, __m128d* trap2, __m128d* len2) {
-
-    // vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
-    __m128d rotx2 = _mm_set1_pd(cos(pi / 2.));
-    __m128d roty2 = _mm_set1_pd(sin(pi / 2.));
-
-
-    // vec3 rp0 = mat3(1.,   0.,    0.,
-    //                0., rt.x, -rt.y, 
-    //                0., rt.y,  rt.x) * p;  
-
-    __m128d rpx2 = _mm_mul_pd(_mm_set1_pd(1.), rtx2);
-    __m128d rpy2 = _mm_add_pd(_mm_mul_pd(rotx2, rty2), _mm_mul_pd(-roty2, rtz2));
-    __m128d rpz2 = _mm_add_pd(_mm_mul_pd(roty2, rty2), _mm_mul_pd(rotx2, rtz2));
-
- 
-    md2(rpx2, rpy2, rpz2, trap2, len2);
-}
-
+    // oprn1 = _mm_set_pd(v.y, v.z);
+    // oprn2 = _mm_set_pd(v.x, r);
+    // _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2));
 
 double map(vec3 p, double& trap, int& ID) {
-    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
+
+    double pi_2 = pi / 2.;
+    vec2 rt = vec2(cos(pi_2), sin(pi_2));
 
     vec3 rp = mat3(1.,   0.,    0.,
                    0., rt.x, -rt.y, 
@@ -275,83 +153,18 @@ vec3 calcNor(vec3 p) {
 }
 
 
-void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d* trap2, __m128d* d2) {
+double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
+    double t = 0;    
+    double len = 0;  
 
-    __m128d ray_multiplier2 = _mm_set1_pd(ray_multiplier);
-    __m128d eps2 = _mm_set1_pd(eps);
-    __m128d far_plane2 = _mm_set1_pd(far_plane);
+    for (int i = 0; i < ray_step; ++i) {
 
-    double buf_pd[2], lenLtEps[2], tGtFarPlane[2], t_out[2];
-    t_out[0] = -1.;
-    t_out[1] = -1.;
-    bool t_out_ready[2] = {false, false};
-    
-    __m128d rdx2 = _mm_set_pd(rd0.x, rd1.x);
-    __m128d rdy2 = _mm_set_pd(rd0.y, rd1.y);
-    __m128d rdz2 = _mm_set_pd(rd0.z, rd1.z);
-
-    __m128d rox2 = _mm_set1_pd(ro.x);
-    __m128d roy2 = _mm_set1_pd(ro.y);
-    __m128d roz2 = _mm_set1_pd(ro.z);
-  
-    __m128d rtx2, rty2, rtz2;
-
-
-    // double t = 0;   
-    __m128d t2 = _mm_set1_pd(0.);
-
-    // double len = 0;  
-    __m128d len2 = _mm_set1_pd(0.);
-
-
-    for (int iter = 0; iter < ray_step; ++iter) {
-
-        // len = map(ro + rd * t, trap, ID); 
-        rtx2 = _mm_add_pd(rox2, _mm_mul_pd(rdx2, t2));
-        rty2 = _mm_add_pd(roy2, _mm_mul_pd(rdy2, t2));
-        rtz2 = _mm_add_pd(roz2, _mm_mul_pd(rdz2, t2));
-
-        map2(rtx2, rty2, rtz2, trap2, &len2);  
-
-        // if (glm::abs(len) < eps || t > far_plane) break;
-        _mm_storeu_pd(buf_pd, len2);  
-        __m128d abs_len2 = _mm_set_pd(glm::abs(buf_pd[1]), glm::abs(buf_pd[0]));
-        _mm_storeu_pd(buf_pd, _mm_cmplt_pd(abs_len2, eps2));  
-        lenLtEps[0] = buf_pd[1];
-        lenLtEps[1] = buf_pd[0];
-
-        _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(t2, far_plane2));  
-        tGtFarPlane[0] = buf_pd[1];
-        tGtFarPlane[1] = buf_pd[0];    
-
-        int i = 0;
-        if(lenLtEps[i] || tGtFarPlane[i]){
-            if(!t_out_ready[i]){
-                t_out_ready[i] = true;
-                _mm_storeu_pd(buf_pd, t2);   
-                t_out[i] = buf_pd[1-i];
-                if(t_out_ready[1-i])break;
-            }
-        }
-
-        i = 1;
-        if(lenLtEps[i] || tGtFarPlane[i]){
-            if(!t_out_ready[i]){
-                t_out_ready[i] = true;
-                _mm_storeu_pd(buf_pd, t2);   
-                t_out[i] = buf_pd[1-i];
-                if(t_out_ready[1-i])break;
-            }
-        }
-
-
-        // t += len * ray_multiplier;
-        t2 = _mm_add_pd(t2, _mm_mul_pd(len2, ray_multiplier2));
+        len = map(ro + rd * t, trap, ID);  
+        if (glm::abs(len) < eps || t > far_plane) break;
+        t += len * ray_multiplier;
     }
 
-    // return t < far_plane ? t : -1.;
-    *d2 = _mm_set_pd(t_out[0] < far_plane ? t_out[0] : -1.,
-                     t_out[1] < far_plane ? t_out[1] : -1.);  
+    return t < far_plane ? t : -1.;  
 }
 
 
@@ -650,24 +463,21 @@ class ThreadManager{
                 jobIdx2ImgCoord(job.idx, &i, &j);
                 job.result = vec4(0.);
 
-                vec4 out[2];
                 for (int m = 0; m < AA; ++m) {
-                    partial_AA(i, j, m, out);
-                    job.result += out[0];
-                    job.result += out[1];
-                }       
+                    for (int n = 0; n < AA; ++n) {
+                    
+                        job.result += partial_AA(i, j, m, n);
 
-                // printf("[pid %d][tid %d][one_job()] d\n", rank, tid);
+                    }
+                }       
  
                 job.result /= (double)(AA * AA);
                 job.result *= 255.0;
                 jobDoneQueue.push(job);
-                
-                // auto start = high_resolution_clock::now();
+
                 // auto stop = high_resolution_clock::now();
                 // auto duration = duration_cast<microseconds>(stop - start);
                 // cerr<<"[pid "<< rank <<", tid: "<< tid <<"] dt: "<<duration.count()<<" us"<<endl;
-
                 // fprintf(stderr, "[pid %d, tid: %d] fprintf(): dt: %d us\n", rank, tid, (int)duration.count());
 
                 // jobTimeTbl[tid] += (int)duration.count();
@@ -682,13 +492,15 @@ class ThreadManager{
 
         Job job;
 
+        
+    
         if(!jobQueue.empty()){
             if(!jobQueue.try_pop(job)){
                 fprintf(stderr, "[pid %d][one_job()] pop failed.\n", rank);
                 return;
             }
 
-            auto start = high_resolution_clock::now();
+            // auto start = high_resolution_clock::now();
 
             
             int i, j;
@@ -697,24 +509,20 @@ class ThreadManager{
 
             job.result = vec4(0.);
 
-            vec4 out[2];
-
             for (int m = 0; m < AA; ++m) {
-
-                partial_AA(i, j, m, out);
-
-                job.result += out[0];
-                job.result += out[1];
+                for (int n = 0; n < AA; ++n) {
+                    
+                    job.result += partial_AA(i, j, m, n);
+                }
             } 
-
-            
             
             job.result /= (double)(AA * AA);
             job.result *= 255.0;
 
-            auto stop = high_resolution_clock::now();
-            auto duration = duration_cast<microseconds>(stop - start);
-            
+            // auto stop = high_resolution_clock::now();
+            // auto duration = duration_cast<microseconds>(stop - start);
+            // cerr<<"[pid "<< rank <<"] dt: "<<duration.count()<<" us"<<endl;
+
             // jobTimeTbl[num_threads - 1] += (int)duration.count();
             
     
@@ -743,88 +551,83 @@ class ThreadManager{
     }
 
 
-
-    void partial_AA(int i, int j, int m, vec4* out){
-
-        
+    vec4 partial_AA(int i, int j, int m, int n){
 
         vec2 iResolution = vec2(width, height);
 
-        vec2 p[2];
-        p[0] = vec2(j, i) + vec2(m, 0.) / (double)AA;
-        p[1] = vec2(j, i) + vec2(m, 1.) / (double)AA;
+        vec2 p = vec2(j, i) + vec2(m, n) / (double)AA;
 
-        vec2 uv[2];
-        uv[0] = (-iResolution.xy() + 2. * p[0]) / iResolution.y;
-        uv[1] = (-iResolution.xy() + 2. * p[1]) / iResolution.y;
-
-        uv[0].y *= -1;  
-        uv[1].y *= -1; 
+        vec2 uv = (-iResolution.xy() + 2. * p) / iResolution.y;
+        uv.y *= -1;  
 
         vec3 ro = camera_pos;               
         vec3 ta = target_pos;               
         vec3 cf = glm::normalize(ta - ro);  
         vec3 cs = glm::normalize(glm::cross(cf, vec3(0., 1., 0.))); 
-        vec3 cu = glm::normalize(glm::cross(cs, cf));     
-
-        vec3 rd[2];
-        rd[0] = glm::normalize(uv[0].x * cs + uv[0].y * cu + FOV * cf); 
-        rd[1] = glm::normalize(uv[1].x * cs + uv[1].y * cu + FOV * cf); 
+        vec3 cu = glm::normalize(glm::cross(cs, cf));               
+        vec3 rd = glm::normalize(uv.x * cs + uv.y * cu + FOV * cf); 
         
+        double trap;  
+        int objID;    
 
-        // double d = trace(ro, rd0, rd1, trap);
-        __m128d d2, trap2;
-        double d[2], trap[2], buf_pd[2];
+        // auto start = high_resolution_clock::now();
 
-        trace(ro, rd[0], rd[1], &trap2, &d2); // dependent loop, 10000 * 24
+        double d = trace(ro, rd, trap, objID); // dependent loop, 10000 * 24
         
-        _mm_storeu_pd(buf_pd, d2);
-        d[0] = buf_pd[1];
-        d[1] = buf_pd[0];
-
-        _mm_storeu_pd(buf_pd, trap2);
-        trap[0] = buf_pd[1];
-        trap[1] = buf_pd[0];
-
-        vec3 col[2];
-        col[0] = vec3(0.);
-        col[1] = vec3(0.);
-
+        // auto stop = high_resolution_clock::now();
+        // auto duration = duration_cast<microseconds>(stop - start);
+        // cerr<<" trace() dt: "<<duration.count()<<" us"<<endl;
+        
+        
+        
+        vec3 col(0.);                          
         vec3 sd = glm::normalize(camera_pos);  
         vec3 sc = vec3(1., .9, .717);          
+        
 
-        for(int i=0;i<2;i++){
-
-            if (d[i] < 0.){
-                col[i] = vec3(0.);  
-            } else {
-                vec3 pos = ro + rd[i] * d[i];             
-                vec3 nr = calcNor(pos);             
-                vec3 hal = glm::normalize(sd - rd[i]); 
-                
-
-                col[i] = pal(trap[i] - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
-                vec3 ambc = vec3(0.3); 
-                double gloss = 32.;    
-
-                double amb = (0.7 + 0.3 * nr.y) * (0.2 + 0.8 * glm::clamp(0.05 * log(trap[i]), 0.0, 1.0));  
-                double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
-                double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
-                double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
-
-                vec3 lin(0.);
-                lin += ambc * (.05 + .95 * amb);  
-                lin += sc * dif * 0.8;            
-                col[i] *= lin;
-
-                col[i] = glm::pow(col[i], vec3(.7, .9, 1.)); 
-                col[i] += spe * 0.8;                      
-            }
+        if (d < 0.) {        
+            col = vec3(0.);  
+        } else {
+            vec3 pos = ro + rd * d;             
+            vec3 nr = calcNor(pos);             
+            vec3 hal = glm::normalize(sd - rd); 
             
-            col[i] = glm::clamp(glm::pow(col[i], vec3(.4545)), 0., 1.); 
-            out[i] = vec4(col[i], 1.);
-        }
 
+            col = pal(trap - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
+            vec3 ambc = vec3(0.3); 
+            double gloss = 32.;    
+
+            double amb =
+                (0.7 + 0.3 * nr.y) *
+                (0.2 + 0.8 * glm::clamp(0.05 * log(trap), 0.0, 1.0));  
+
+            // start = high_resolution_clock::now();
+
+            double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
+            
+            // stop = high_resolution_clock::now();
+            // duration = duration_cast<microseconds>(stop - start);
+            // cerr<<" softshadow() dt: "<<duration.count()<<" us"<<endl;
+            
+            
+                
+            double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
+            double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
+
+
+            vec3 lin(0.);
+            lin += ambc * (.05 + .95 * amb);  
+            lin += sc * dif * 0.8;            
+            col *= lin;
+
+            col = glm::pow(col, vec3(.7, .9, 1.)); 
+            col += spe * 0.8;                      
+        }
+        
+
+        col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
+
+        return vec4(col, 1.);
     }
 
 
@@ -975,6 +778,8 @@ class ProcessManager{
         dynamic_job_enqueue();
         tmPtr->start_thread();
 
+        auto start = high_resolution_clock::now();
+
         while(1){
 
             if(!tmPtr->jobQueue.empty()){
@@ -987,7 +792,7 @@ class ProcessManager{
             }
             else{
                 local_receive_completed_jobs(); // 350 us
-                if(check_send_terminate_signal()) return;
+                if(check_send_terminate_signal()) break;
             }
 
             receive_completed_jobs(); // probe: 2us. if true: 250 us
@@ -995,9 +800,68 @@ class ProcessManager{
             dynamic_job_enqueue(); // if true: 24 us.
 
             // probe_load_distribution();
-        }  
+        } 
+
+        auto stop = high_resolution_clock::now();
+        auto duration = duration_cast<microseconds>(stop - start);
+        cerr<< " total run time: "<<duration.count()<<" us"<<endl;
+        
     }
-    
+
+
+
+
+
+
+    // int loadDistLen = 100000;
+    // int **loadDistTbl;
+    // int loadDist_ofst=0;
+
+    // void probe_load_distribution(){
+
+    //     loadDist_ofst++;
+    //     if(loadDist_ofst >= loadDistLen){
+    //         fprintf(stdout, \
+    //          "[probe_load_distribution()] Warning: loadDist_ofst >= loadDistLen\n");
+    //     } 
+    //     else{
+    //         for(int i=0;i<worldSize;i++){
+    //             loadDistTbl[i][loadDist_ofst] = procCtrlTbl[i].jobQueue.size();
+    //         }
+    //     }
+    // }
+
+
+
+    // void print_stat(){
+        
+    //     // ofstream outfile;
+    //     // string outfileName = "jobTime" + to_string(rank) + ".txt";        
+    //     // outfile.open (outfileName);
+
+    //     // for(int i=0;i<tmPtr->num_threads;i++){
+    //     //     outfile << "[print_stat()] jobTimeTbl[" << i << "]: " << tmPtr->jobTimeTbl[i] << "\n"; 
+    //     // }
+        
+    //     // outfile.close();
+    //     fprintf(stdout, "[print_stat()] loadDist_ofst: %d\n", loadDist_ofst);
+
+    //     ofstream outfile;
+    //     string outfileName;
+
+    //     for(int i=0; i < worldSize; i++){
+            
+    //         outfileName = "loadDist_pid" + to_string(i) + ".txt";  
+    //         outfile.open(outfileName);
+
+    //         for(int j=0; j < loadDist_ofst; j++){
+    //             outfile << loadDistTbl[i][j] << "\n"; 
+    //         }
+
+    //         outfile.close();
+    //     }
+    // }
+
 
 
     void local_receive_completed_jobs(){
@@ -1033,16 +897,16 @@ class ProcessManager{
             image[i][4 * j + 2] = (unsigned char)job.result.b;  
             image[i][4 * j + 3] = (unsigned char)255;  
 
-            ofst++;
+            // ofst++;
         }
 
 
-        if(ofst > 0){
-            nJobsCmpltd += ofst;
+        // if(ofst > 0){
+        //     nJobsCmpltd += ofst;
 
-            fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n",
-            rank, nJobsCmpltd);                                     
-        }
+        //     fprintf(stdout, "[proc %d][local_receive_completed_jobs()] from pid 0 recvSz: %d\n",
+        //     rank, nJobsCmpltd);                                     
+        // }
     }
 
 
@@ -1506,12 +1370,15 @@ class Process{
 
 void write_png(ProcessManager* pm){
 
+    fprintf(stdout, "[write_png()] a\n");
 
     unsigned error = lodepng_encode32_file(pm->filename, pm->raw_image, pm->tmPtr->width, pm->tmPtr->height);
 
+    fprintf(stdout, "[write_png()] b\n");
 
     if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
 
+    fprintf(stdout, "[write_png()] c\n");
 }
 
 
@@ -1533,10 +1400,12 @@ int main(int argc, char** argv) {
         ProcessManager pm(argv, rank, worldSize);
         pm.start_process();
 
+        fprintf(stdout, "[proc %d][main()] b\n", rank);
 
         // pm.write_png();
         write_png(&pm);
 
+        fprintf(stdout, "[proc %d][main()] c\n", rank);
     }
     else{
         Process proc(argv, rank, worldSize);
@@ -1544,6 +1413,7 @@ int main(int argc, char** argv) {
         
     }
 
+    fprintf(stdout, "[proc %d][main()] d\n", rank);
 
    
 

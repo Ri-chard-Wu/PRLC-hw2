@@ -21,7 +21,8 @@ if [ -f "$RunFile" ]; then
     echo "=            Run hw2             ="
     echo "==================================="
 
-    srun -N ${N} -n ${n} -c ${c} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out 
+    srun -N ${N} -n ${n} -c ${c} $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out \
+    # srun -N ${N} -n ${n} -c 1 $RunFile $num_threads $x1 $y1 $z1 $x2 $y2 $z2 $width $height $outFile 2> run-stderr.out 
 
 
     echo "==================================="
