@@ -7,7 +7,7 @@ cd ~/hw2/tests
 
 
 rm sse
-g++ -O2 -msse2 --std=c++14 sse.cc -o sse
+g++ -O3 -msse2 -std=c++17 sse.cc -o sse
 FILE=./sse
 
 # FILE=test_see_speedup

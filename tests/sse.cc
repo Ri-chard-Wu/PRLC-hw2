@@ -1,4 +1,12 @@
 #include <iostream>
+#include <cassert>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+
+#define GLM_FORCE_SWIZZLE  
+#include <glm/glm.hpp>
+
 
 #ifdef __SSE2__
   #include <emmintrin.h>
@@ -8,8 +16,12 @@
 
 using namespace std;
 
+
+
 int main(int argc, char **argv)
 {
+
+
 
     // __m128d a = _mm_set_pd(4.0, 3.0);
     // __m128d b = _mm_set_pd(6.0, 5.0);
@@ -67,37 +79,44 @@ int main(int argc, char **argv)
     //     std::cout << "1's are not equal"<< endl;
     // }
 
+    // if(buf_pd[0] && buf_pd[1]){
+    //     std::cout << "0 or 1 is true"<< endl;
+    // }
+
 
 
     
-    // a = _mm_set_pd(4.0, 60.0);
-    // b = _mm_set_pd(6.0, 3.0);
-
-    // _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(a, b));
-    // if(buf_pd[0]){
-    //     std::cout << "a[0] > b[0]"<< endl;
-    // }
-    // else{
-    //     std::cout << "a[0] <= b[0]"<< endl;
-    // }
-
-    // if(buf_pd[1]){
-    //     std::cout << "a[1] > b[1]"<< endl;
-    // }
-    // else{
-    //     std::cout << "a[1] <= b[1]"<< endl;
-    // }
-
-
-
-
     a = _mm_set_pd(4.0, 60.0);
-    b = _mm_set_pd(6.0, 300.0);
+    b = _mm_set_pd(6.0, 3.0);
 
-    _mm_storeu_pd(buf_pd, _mm_min_pd(-a, b));
+    _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(a, b));
+    
+    if(buf_pd[0]){
+        std::cout << "a[0] > b[0]"<< endl;
+    }
+    else{
+        std::cout << "a[0] <= b[0]"<< endl;
+    }
+
+    if(buf_pd[1]){
+        std::cout << "a[1] > b[1]"<< endl;
+    }
+    else{
+        std::cout << "a[1] <= b[1]"<< endl;
+    }
+
+
+
+
+    // a = _mm_set_pd(4.0, 60.0);
+    // b = _mm_set_pd(6.0, 300.0);
+
+    // _mm_storeu_pd(buf_pd, _mm_min_pd(-a, b));
  
-    cout << "min[0]" << buf_pd[0] << endl;
-    cout << "min[1]" << buf_pd[1] << endl;
+    // cout << "min[0]" << buf_pd[0] << endl;
+    // cout << "min[1]" << buf_pd[1] << endl;
+
+
  
 
 

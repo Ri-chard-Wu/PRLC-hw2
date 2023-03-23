@@ -2,7 +2,7 @@ CXX = mpicxx
 CC  = mpicc
 CPPFLAGS = -I/home/ipc23/share/hw2/lodepng
 LDFLAGS = -pthread -fopenmp -lm 
-CXXFLAGS = -ltbb -std=c++17 -O3
+CXXFLAGS = -ltbb -msse2 -std=c++17 -O3
 TARGET = hw2
 HW2 = hw2.cc
 LODEPNG = /home/ipc23/share/hw2/lodepng/lodepng.cpp
