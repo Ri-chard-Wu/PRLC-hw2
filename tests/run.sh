@@ -6,13 +6,19 @@ cd ~/hw2/tests
 # FILE=./test
 
 
-rm sse
-g++ -O3 -msse2 -std=c++17 sse.cc -o sse
-FILE=./sse
+# rm sse
+# g++ -O3 -msse2 -std=c++17 sse.cc -o sse
+# FILE=./sse
 
 # FILE=test_see_speedup
 # rm $FILE
 # g++ -O2 -msse2 --std=c++14 $FILE.cc -o $FILE
+
+
+
+FILE=parallel_for
+rm $FILE
+g++ -O3 -ltbb -std=c++17 $FILE.cc -o $FILE
 
 
 

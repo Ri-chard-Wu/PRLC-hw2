@@ -1,6 +1,112 @@
 [proc 0][init_procCtrlTbl()] after init, proc njob:
 262144, 262144, 262144, 262144, 
-srun: interrupt (one more within 1 sec to abort)
-srun: step:4306073.0 tasks 0-3: running
-srun: sending Ctrl-C to job 4306073.0
-srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+[pid 3][job()] pop failed.
+[dynamic_job_schedule()] maxNJob: 244144, maxNJobPid: 1, minNJob: 234144, minNJobPid: 3
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 524287 - 519288
+[proc 3][dynamic_job_receive()] recvSz: 5000, 524287 - 519288
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 3][job()] pop failed.
+[pid 1][job()] pop failed.
+[pid 1][job()] pop failed.
+[pid 1][job()] pop failed.
+[pid 1][job()] pop failed.
+[dynamic_job_schedule()] maxNJob: 229927, maxNJobPid: 0, minNJob: 219144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 262143 - 257144
+[dynamic_job_schedule()] maxNJob: 221144, maxNJobPid: 1, minNJob: 210144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 519287 - 514288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 519287 - 514288
+[dynamic_job_schedule()] maxNJob: 218144, maxNJobPid: 2, minNJob: 207144, minNJobPid: 3
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 786431 - 781432
+[proc 3][dynamic_job_receive()] recvSz: 5000, 786431 - 781432
+[dynamic_job_schedule()] maxNJob: 214862, maxNJobPid: 0, minNJob: 204144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 257143 - 252144
+[dynamic_job_schedule()] maxNJob: 212144, maxNJobPid: 1, minNJob: 201144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 514287 - 509288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 514287 - 509288
+[dynamic_job_schedule()] maxNJob: 207854, maxNJobPid: 0, minNJob: 196144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 252143 - 247144
+[dynamic_job_schedule()] maxNJob: 207144, maxNJobPid: 2, minNJob: 197144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 781431 - 776432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 781431 - 776432
+[dynamic_job_schedule()] maxNJob: 205144, maxNJobPid: 1, minNJob: 194144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 509287 - 504288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 509287 - 504288
+[dynamic_job_schedule()] maxNJob: 200850, maxNJobPid: 0, minNJob: 189144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 247143 - 242144
+[dynamic_job_schedule()] maxNJob: 200144, maxNJobPid: 2, minNJob: 190144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 776431 - 771432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 776431 - 771432
+[dynamic_job_schedule()] maxNJob: 198144, maxNJobPid: 1, minNJob: 187144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 504287 - 499288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 504287 - 499288
+[dynamic_job_schedule()] maxNJob: 193843, maxNJobPid: 0, minNJob: 182144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 242143 - 237144
+[dynamic_job_schedule()] maxNJob: 193144, maxNJobPid: 2, minNJob: 183144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 771431 - 766432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 771431 - 766432
+[dynamic_job_schedule()] maxNJob: 191144, maxNJobPid: 1, minNJob: 180144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 499287 - 494288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 499287 - 494288
+[dynamic_job_schedule()] maxNJob: 188843, maxNJobPid: 0, minNJob: 177144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 237143 - 232144
+[dynamic_job_schedule()] maxNJob: 186144, maxNJobPid: 1, minNJob: 176144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 494287 - 489288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 494287 - 489288
+[dynamic_job_schedule()] maxNJob: 186144, maxNJobPid: 2, minNJob: 175144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 766431 - 761432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 766431 - 761432
+[dynamic_job_schedule()] maxNJob: 181839, maxNJobPid: 0, minNJob: 170144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 232143 - 227144
+[dynamic_job_schedule()] maxNJob: 179144, maxNJobPid: 1, minNJob: 169144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 489287 - 484288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 489287 - 484288
+[dynamic_job_schedule()] maxNJob: 179144, maxNJobPid: 2, minNJob: 168144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 761431 - 756432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 761431 - 756432
+[dynamic_job_schedule()] maxNJob: 174832, maxNJobPid: 0, minNJob: 163144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 227143 - 222144
+[dynamic_job_schedule()] maxNJob: 174144, maxNJobPid: 1, minNJob: 164144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 484287 - 479288
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 484287 - 479288
+[dynamic_job_schedule()] maxNJob: 172144, maxNJobPid: 2, minNJob: 161144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 756431 - 751432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 756431 - 751432
+[dynamic_job_schedule()] maxNJob: 169832, maxNJobPid: 0, minNJob: 158144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 222143 - 217144
+[dynamic_job_schedule()] maxNJob: 167144, maxNJobPid: 1, minNJob: 157144, minNJobPid: 3
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 479287 - 474288
+[proc 3][dynamic_job_receive()] recvSz: 5000, 479287 - 474288
+[dynamic_job_schedule()] maxNJob: 167144, maxNJobPid: 2, minNJob: 156144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 751431 - 746432
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 751431 - 746432
+[dynamic_job_schedule()] maxNJob: 162824, maxNJobPid: 0, minNJob: 151144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 217143 - 212144
+[dynamic_job_schedule()] maxNJob: 160144, maxNJobPid: 1, minNJob: 150144, minNJobPid: 3
+[proc 1][dynamic_job_cancel()] recvSz: 5000, 474287 - 469288
+[proc 3][dynamic_job_receive()] recvSz: 5000, 474287 - 469288
+[dynamic_job_schedule()] maxNJob: 160144, maxNJobPid: 2, minNJob: 149144, minNJobPid: 3
+[proc 2][dynamic_job_cancel()] recvSz: 5000, 746431 - 741432
+[proc 3][dynamic_job_receive()] recvSz: 5000, 746431 - 741432
+[dynamic_job_schedule()] maxNJob: 141645, maxNJobPid: 0, minNJob: 130144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 212143 - 207144
+[dynamic_job_schedule()] maxNJob: 92444, maxNJobPid: 0, minNJob: 81144, minNJobPid: 2
+[proc 2][dynamic_job_receive()] recvSz: 5000, 207143 - 202144
+[dynamic_job_schedule()] maxNJob: 63288, maxNJobPid: 0, minNJob: 53144, minNJobPid: 3
+[proc 3][dynamic_job_receive()] recvSz: 5000, 202143 - 197144
+[dynamic_job_schedule()] maxNJob: 18068, maxNJobPid: 0, minNJob: 7144, minNJobPid: 1
+[proc 1][dynamic_job_receive()] recvSz: 5000, 197143 - 192144
+[pid 3][job()] pop failed.
+
+[check_receive_terminate_signal()][proc 1]             receive terminate signal. Terminating...
+
+
+[check_receive_terminate_signal()][proc 3]             receive terminate signal. Terminating...
+
+
+[check_receive_terminate_signal()][proc 2]             receive terminate signal. Terminating...
+

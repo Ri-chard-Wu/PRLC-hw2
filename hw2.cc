@@ -117,7 +117,7 @@ void md2(__m128d px2, __m128d py2, __m128d pz2, __m128d* trap2, __m128d* len2) {
     *trap2 = r2;
 
 
-    for (int i = 0; i < md_iter; ++i) {
+    for (int iter = 0; iter < md_iter; ++iter) {
 
         // double theta = glm::atan(v.y, v.x) * power;
         _mm_storeu_pd(buf_pd, _mm_div_pd(vy2, vx2));    
@@ -167,21 +167,34 @@ void md2(__m128d px2, __m128d py2, __m128d pz2, __m128d* trap2, __m128d* len2) {
         // if (r > bailout) break; 
         _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(r2, bailout2));
 
-        for(int i=0;i<2;i++){
-            if(buf_pd[1-i]){
-                if (r_out[i] <= bailout){
+        int i=0;
+        if(buf_pd[1-i]){
+            if (r_out[i] <= bailout){
 
-                    _mm_storeu_pd(buf_out, r2);
-                    r_out[i] = buf_out[1-i];
+                _mm_storeu_pd(buf_out, r2);
+                r_out[i] = buf_out[1-i];
 
-                    _mm_storeu_pd(buf_out, dr2);
-                    dr_out[i] = buf_out[1-i];
+                _mm_storeu_pd(buf_out, dr2);
+                dr_out[i] = buf_out[1-i];
 
-                    if (r_out[1-i] > bailout) break;
-                } 
-            }            
-        }
+                if (r_out[1-i] > bailout) break;
+            } 
+        }    
 
+        i = 1;
+        if(buf_pd[1-i]){
+            if (r_out[i] <= bailout){
+
+                _mm_storeu_pd(buf_out, r2);
+                r_out[i] = buf_out[1-i];
+
+                _mm_storeu_pd(buf_out, dr2);
+                dr_out[i] = buf_out[1-i];
+
+                if (r_out[1-i] > bailout) break;
+            } 
+        } 
+        
     }
 
 
@@ -271,6 +284,7 @@ void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d* trap2, __m128d* d2) {
     double buf_pd[2], lenLtEps[2], tGtFarPlane[2], t_out[2];
     t_out[0] = -1.;
     t_out[1] = -1.;
+    bool t_out_ready[2] = {false, false};
     
     __m128d rdx2 = _mm_set_pd(rd0.x, rd1.x);
     __m128d rdy2 = _mm_set_pd(rd0.y, rd1.y);
@@ -290,7 +304,7 @@ void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d* trap2, __m128d* d2) {
     __m128d len2 = _mm_set1_pd(0.);
 
 
-    for (int i = 0; i < ray_step; ++i) {
+    for (int iter = 0; iter < ray_step; ++iter) {
 
         // len = map(ro + rd * t, trap, ID); 
         rtx2 = _mm_add_pd(rox2, _mm_mul_pd(rdx2, t2));
@@ -298,10 +312,11 @@ void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d* trap2, __m128d* d2) {
         rtz2 = _mm_add_pd(roz2, _mm_mul_pd(rdz2, t2));
 
         map2(rtx2, rty2, rtz2, trap2, &len2);  
-         
 
         // if (glm::abs(len) < eps || t > far_plane) break;
-        _mm_storeu_pd(buf_pd, _mm_cmplt_pd(len2, eps2));  
+        _mm_storeu_pd(buf_pd, len2);  
+        __m128d abs_len2 = _mm_set_pd(glm::abs(buf_pd[1]), glm::abs(buf_pd[0]));
+        _mm_storeu_pd(buf_pd, _mm_cmplt_pd(abs_len2, eps2));  
         lenLtEps[0] = buf_pd[1];
         lenLtEps[1] = buf_pd[0];
 
@@ -309,15 +324,26 @@ void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d* trap2, __m128d* d2) {
         tGtFarPlane[0] = buf_pd[1];
         tGtFarPlane[1] = buf_pd[0];    
 
-        for(int i=0;i<2;i++){
-            if(lenLtEps[i] || tGtFarPlane[i]){
-                if(t_out[i] < 0){
-                    _mm_storeu_pd(buf_pd, t2);   
-                    t_out[i] = buf_pd[1-i];
-                    if(t_out[1-i] >= 0)break;
-                }
+        int i = 0;
+        if(lenLtEps[i] || tGtFarPlane[i]){
+            if(!t_out_ready[i]){
+                t_out_ready[i] = true;
+                _mm_storeu_pd(buf_pd, t2);   
+                t_out[i] = buf_pd[1-i];
+                if(t_out_ready[1-i])break;
             }
         }
+
+        i = 1;
+        if(lenLtEps[i] || tGtFarPlane[i]){
+            if(!t_out_ready[i]){
+                t_out_ready[i] = true;
+                _mm_storeu_pd(buf_pd, t2);   
+                t_out[i] = buf_pd[1-i];
+                if(t_out_ready[1-i])break;
+            }
+        }
+
 
         // t += len * ray_multiplier;
         t2 = _mm_add_pd(t2, _mm_mul_pd(len2, ray_multiplier2));
@@ -673,16 +699,9 @@ class ThreadManager{
 
             vec4 out[2];
 
-            // printf("[pid %d][one_job()] a\n", rank);
-
             for (int m = 0; m < AA; ++m) {
 
-                // printf("[pid %d][one_job()] b\n", rank);
-
                 partial_AA(i, j, m, out);
-
-                // printf("[pid %d][one_job()] c\n", rank);
-
 
                 job.result += out[0];
                 job.result += out[1];
@@ -1014,7 +1033,7 @@ class ProcessManager{
             image[i][4 * j + 2] = (unsigned char)job.result.b;  
             image[i][4 * j + 3] = (unsigned char)255;  
 
-            // ofst++;
+            ofst++;
         }
 
 

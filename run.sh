@@ -36,7 +36,7 @@ if [ -f "$RunFile" ]; then
     echo "==================================="
 
     ./hw2-diff $outFile $valid
-    rm $outFile
+    # rm $outFile
 
 else
 
