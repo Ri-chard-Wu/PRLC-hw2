@@ -681,8 +681,9 @@ class ThreadManager{
         double trap;  
 
 
-
-        double d = trace(ro, rd0, rd1, trap); // dependent loop, 10000 * 24
+        // double d = trace(ro, rd0, rd1, trap);
+        __m128d d2;
+        trace(ro, rd0, rd1, trap0, trap1, d2); // dependent loop, 10000 * 24
         
 
         
