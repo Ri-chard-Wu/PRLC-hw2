@@ -86,20 +86,22 @@ double md(vec3 p, double& trap) {
 }
 
 
-void md2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
+// double md(vec3 p, double& trap)
+void md2(__m128d rpx2, __m128d rpy2, __m128d rpz2, __m128d& trap2, __m128d& out2) {
 
     __m128d bailout2 = _mm_set_pd(bailout, bailout);
     double r0_out = 0, r1_out = 0;
+    double buf_pd[2];  
+
 
     // vec3 v = p;
-    __m128d vx2 = _mm_set_pd(p0.x, p1.x);
-    __m128d vy2 = _mm_set_pd(p0.y, p1.y);
-    __m128d vz2 = _mm_set_pd(p0.z, p1.z);
+    __m128d vx2 = rpx2;
+    __m128d vy2 = rpy2;
+    __m128d vz2 = rpz2;
 
     // double dr = 1.;
     __m128d dr2 = _mm_set1_pd(1.)
 
-    double buf_pd[2];         
 
     // double r = glm::length(v);
     // trap = r;
@@ -166,16 +168,16 @@ void md2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
         _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(r2, bailout2));
 
         if(buf_pd[1]){
-            if (r0_out < bailout){
+            if (r0_out <= bailout){
                 r0_out = buf_pd[1];
-                if ((r0_out > bailout) && (r1_out > bailout)) break;
+                if (r1_out > bailout) break;
             } 
         }
 
         if(buf_pd[0]){
-            if (r1_out < bailout){
+            if (r1_out <= bailout){
                 r1_out = buf_pd[0];
-                if ((r0_out > bailout) && (r1_out > bailout)) break;
+                if (r0_out > bailout) break;
             } 
         }
     }
@@ -187,18 +189,25 @@ void md2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
     out2 = _mm_div_pd(_mm_mul_pd(_mm_mul_pd(_mm_set1_pd(0.5), log_r2), r2), dr2);
 }
 
-void map2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
-    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
 
-    vec3 rp0 = mat3(1.,   0.,    0.,
-                   0., rt.x, -rt.y, 
-                   0., rt.y,  rt.x) * p0;  
+// double map(vec3 p, double& trap, int& ID)
+void map2(__m128d rtx2, __m128d rty2, __m128d rtz2, __m128d& trap2, __m128d& out2) {
 
-    vec3 rp1 = mat3(1.,   0.,    0.,
-                   0., rt.x, -rt.y, 
-                   0., rt.y,  rt.x) * p1;  
+    // vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
+    __m128d rotx2 = _mm_set1_pd(cos(pi / 2.));
+    __m128d roty2 = _mm_set1_pd(sin(pi / 2.));
 
-    md2(rp0, rp1, trap2, out2);
+
+    // vec3 rp0 = mat3(1.,   0.,    0.,
+    //                0., rt.x, -rt.y, 
+    //                0., rt.y,  rt.x) * p;  
+
+    __m128d rpx2 = _mm_mul_pd(_mm_set1_pd(1.), rtx2);
+    __m128d rpy2 = _mm_add_pd(_mm_mul_pd(rotx2, rty2), _mm_mul_pd(-roty2, rtz2));
+    __m128d rpz2 = _mm_add_pd(_mm_mul_pd(roty2, rty2), _mm_mul_pd(rotx2, rtz2));
+
+ 
+    md2(rpx2, rpy2, rpz2, trap2, out2);
 }
 
 
@@ -250,30 +259,66 @@ vec3 calcNor(vec3 p) {
 
 void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d& trap2, __m128d& d2) {
 
-    double buf_pd[2], len0, len1, t0, t1, t0_out=-1, t1_out=-1;
+    __m128d eps2 = _mm_set1_pd(eps);
+    __m128d far_plane2 = _mm_set1_pd(far_plane);
+
+    double buf_pd[2], lenLtEps0, lenLtEps1, tGtFarPlane0, tGtFarPlane1, t0_out=-1, t1_out=-1;
     
     // double t = 0;   
     __m128d t2 = _mm_set1_pd(0.);
 
-    // double len0 = 0, len0 = 1;  
+    // double len0 = 0, len1 = 0;  
     __m128d len2 = _mm_set1_pd(0.);
     __m128d ray_multiplier2 = _mm_set1_pd(ray_multiplier);
+
+    __m128d rdx2 = _mm_set_pd(rd0.x, rd1.x);
+    __m128d rdy2 = _mm_set_pd(rd0.y, rd1.y);
+    __m128d rdz2 = _mm_set_pd(rd0.z, rd1.z);
+
+    __m128d rox2 = _mm_set1_pd(ro.x);
+    __m128d roy2 = _mm_set1_pd(ro.y);
+    __m128d roz2 = _mm_set1_pd(ro.z);
+  
+    __m128d rtx2, rty2, rtz2;
+
+
 
     for (int i = 0; i < ray_step; ++i) {
 
         // len = map(ro + rd * t, trap, ID); 
-        map2(ro + rd0 * t, ro + rd1 * t, trap2, len2);  
+        rtx2 = _mm_add_pd(rox2, _mm_mul_pd(rdx2, t2))
+        rty2 = _mm_add_pd(roy2, _mm_mul_pd(rdy2, t2))
+        rtz2 = _mm_add_pd(roz2, _mm_mul_pd(rdz2, t2))
+        map2(rtx2, rty2, rtz2, trap2, len2);  
          
+
         // if (glm::abs(len) < eps || t > far_plane) break;
-        _mm_storeu_pd(buf_pd, len2);  
-        len0 = buf_pd[1];
-        len1 = buf_pd[0];
-        _mm_storeu_pd(buf_pd, t2);  
-        t0 = buf_pd[1];
-        t1 = buf_pd[0];    
-        if((t0_out > 0) && (t1_out > 0)) break;
-        if (glm::abs(len0) < eps || t0 > far_plane) t0_out = t0;       
-        if (glm::abs(len1) < eps || t1 > far_plane) t1_out = t1;       
+
+        
+        _mm_storeu_pd(buf_pd, _mm_cmplt_pd(len2, eps2));  
+        lenLtEps0 = buf_pd[1];
+        lenLtEps1 = buf_pd[0];
+
+        _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(t2, far_plane2));  
+        tGtFarPlane0 = buf_pd[1];
+        tGtFarPlane1 = buf_pd[0];    
+
+        if(lenLtEps0 || tGtFarPlane0){
+            if(t0_out < 0){
+                _mm_storeu_pd(buf_pd, t2);   
+                t0_out = buf_pd[1];
+                if(t1_out >= 0)break;
+            }
+        }
+
+        if(lenLtEps1 || tGtFarPlane1){
+            if(t1_out < 0){
+                _mm_storeu_pd(buf_pd, t2);  
+                t1_out = buf_pd[0];
+                if(t0_out >= 0)break;
+            }
+        }
+     
 
         // t += len * ray_multiplier;
         t2 = _mm_add_pd(t2, _mm_mul_pd(len2, ray_multiplier2));

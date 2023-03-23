@@ -94,7 +94,7 @@ int main(int argc, char **argv)
     a = _mm_set_pd(4.0, 60.0);
     b = _mm_set_pd(6.0, 300.0);
 
-    _mm_storeu_pd(buf_pd, _mm_min_pd(a, b));
+    _mm_storeu_pd(buf_pd, _mm_min_pd(-a, b));
  
     cout << "min[0]" << buf_pd[0] << endl;
     cout << "min[1]" << buf_pd[1] << endl;
