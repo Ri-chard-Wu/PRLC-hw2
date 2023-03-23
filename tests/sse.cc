@@ -70,24 +70,35 @@ int main(int argc, char **argv)
 
 
     
+    // a = _mm_set_pd(4.0, 60.0);
+    // b = _mm_set_pd(6.0, 3.0);
+
+    // _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(a, b));
+    // if(buf_pd[0]){
+    //     std::cout << "a[0] > b[0]"<< endl;
+    // }
+    // else{
+    //     std::cout << "a[0] <= b[0]"<< endl;
+    // }
+
+    // if(buf_pd[1]){
+    //     std::cout << "a[1] > b[1]"<< endl;
+    // }
+    // else{
+    //     std::cout << "a[1] <= b[1]"<< endl;
+    // }
+
+
+
+
     a = _mm_set_pd(4.0, 60.0);
-    b = _mm_set_pd(6.0, 3.0);
+    b = _mm_set_pd(6.0, 300.0);
 
-    _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(a, b));
-    if(buf_pd[0]){
-        std::cout << "a[0] > b[0]"<< endl;
-    }
-    else{
-        std::cout << "a[0] <= b[0]"<< endl;
-    }
-
-    if(buf_pd[1]){
-        std::cout << "a[1] > b[1]"<< endl;
-    }
-    else{
-        std::cout << "a[1] <= b[1]"<< endl;
-    }
-
+    _mm_storeu_pd(buf_pd, _mm_min_pd(a, b));
+ 
+    cout << "min[0]" << buf_pd[0] << endl;
+    cout << "min[1]" << buf_pd[1] << endl;
+ 
 
 
     return 0;

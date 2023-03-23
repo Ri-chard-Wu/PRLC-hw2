@@ -86,7 +86,10 @@ double md(vec3 p, double& trap) {
 }
 
 
-void md2(vec3 p0, vec3 p1, double& trap0, double& trap1, __m128d& out2) {
+void md2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
+
+    __m128d bailout2 = _mm_set_pd(bailout, bailout);
+    double r0_out = 0, r1_out = 0;
 
     // vec3 v = p;
     __m128d vx2 = _mm_set_pd(p0.x, p1.x);
@@ -98,13 +101,13 @@ void md2(vec3 p0, vec3 p1, double& trap0, double& trap1, __m128d& out2) {
 
     double buf_pd[2];         
 
-    double r0_out = 0, r1_out = 0;
-
     // double r = glm::length(v);
     // trap = r;
-    trap0 = glm::length(p0);
-    trap1 = glm::length(p1);
-    __m128d r2 = _mm_set_pd(trap0, trap1);
+    __m128d vx2_sq = _mm_mul_pd(vx2, vx2);
+    __m128d vy2_sq = _mm_mul_pd(vy2, vy2);
+    __m128d vz2_sq = _mm_mul_pd(vz2, vz2);
+    __m128d r2 = _mm_sqrt_pd(_mm_add_pd(_mm_add_pd(vx2_sq, vy2_sq), vz2_sq));
+    trap2 = r2;
 
 
     for (int i = 0; i < md_iter; ++i) {
@@ -147,33 +150,44 @@ void md2(vec3 p0, vec3 p1, double& trap0, double& trap1, __m128d& out2) {
 
         // trap = glm::min(trap, r);
         _mm_storeu_pd(buf_pd, r2);
-        trap0 = glm::length(buf_pd[0]);
-        trap1 = glm::length(buf_pd[1]);        
+        // trap0 = glm::length(buf_pd[0]);
+        // trap1 = glm::length(buf_pd[1]); 
+        trap2 = _mm_min_pd(trap2, r2)       
 
         // r = glm::length(v);    
-        __m128d vx2_sq = _mm_mul_pd(vx2, vx2)
-        __m128d vy2_sq = _mm_mul_pd(vy2, vy2)
-        __m128d vz2_sq = _mm_mul_pd(vz2, vz2)
+        vx2_sq = _mm_mul_pd(vx2, vx2)
+        vy2_sq = _mm_mul_pd(vy2, vy2)
+        vz2_sq = _mm_mul_pd(vz2, vz2)
         r2 = _mm_sqrt_pd(_mm_add_pd(_mm_add_pd(vx2_sq, vy2_sq), vz2_sq));
+    
+
+        // if (r > bailout) break; 
         
-        // if (r > bailout) break;  
-        _mm_storeu_pd(buf_pd, r2);
-        if ((r0_out > bailout) && (r1_out > bailout)) break;
-        else{
-            if (buf_pd[1] > bailout) r0_out = buf_pd[1];
-            if (buf_pd[0] > bailout) r1_out = buf_pd[0];
+        _mm_storeu_pd(buf_pd, _mm_cmpgt_pd(r2, bailout2));
+
+        if(buf_pd[1]){
+            if (r0_out < bailout){
+                r0_out = buf_pd[1];
+                if ((r0_out > bailout) && (r1_out > bailout)) break;
+            } 
+        }
+
+        if(buf_pd[0]){
+            if (r1_out < bailout){
+                r1_out = buf_pd[0];
+                if ((r0_out > bailout) && (r1_out > bailout)) break;
+            } 
         }
     }
 
-    out0 = 0.5 * log(r0_out) * r0_out / dr; 
-    out1 = 0.5 * log(r1_out) * r1_out / dr; 
-
-    out2 = _mm_set_pd(out0, out1);
 
     // return 0.5 * log(r) * r / dr;  
+    r2 = _mm_set_pd(r0_out, r1_out);
+    __m128d log_r2 = _mm_set_pd(log(r0_out), log(r1_out));
+    out2 = _mm_div_pd(_mm_mul_pd(_mm_mul_pd(_mm_set1_pd(0.5), log_r2), r2), dr2);
 }
 
-void map2(vec3 p0, vec3 p1, double& trap0, double& trap1, __m128d& out2) {
+void map2(vec3 p0, vec3 p1, __m128d& trap2, __m128d& out2) {
     vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
 
     vec3 rp0 = mat3(1.,   0.,    0.,
@@ -184,7 +198,7 @@ void map2(vec3 p0, vec3 p1, double& trap0, double& trap1, __m128d& out2) {
                    0., rt.x, -rt.y, 
                    0., rt.y,  rt.x) * p1;  
 
-    md2(rp0, rp1, trap0, trap1, out2);
+    md2(rp0, rp1, trap2, out2);
 }
 
 
@@ -234,7 +248,7 @@ vec3 calcNor(vec3 p) {
 }
 
 
-void trace(vec3 ro, vec3 rd0, vec3 rd1, double& trap0, double& trap1, __m128d& d2) {
+void trace(vec3 ro, vec3 rd0, vec3 rd1, __m128d& trap2, __m128d& d2) {
 
     double buf_pd[2], len0, len1, t0, t1, t0_out=-1, t1_out=-1;
     
@@ -248,7 +262,7 @@ void trace(vec3 ro, vec3 rd0, vec3 rd1, double& trap0, double& trap1, __m128d& d
     for (int i = 0; i < ray_step; ++i) {
 
         // len = map(ro + rd * t, trap, ID); 
-        map2(ro + rd0 * t, ro + rd1 * t, trap0, trap1, len2);  
+        map2(ro + rd0 * t, ro + rd1 * t, trap2, len2);  
          
         // if (glm::abs(len) < eps || t > far_plane) break;
         _mm_storeu_pd(buf_pd, len2);  
@@ -576,7 +590,7 @@ class ThreadManager{
                 job.result /= (double)(AA * AA);
                 job.result *= 255.0;
                 jobDoneQueue.push(job);
-
+                auto start = high_resolution_clock::now();
                 auto stop = high_resolution_clock::now();
                 auto duration = duration_cast<microseconds>(stop - start);
                 // cerr<<"[pid "<< rank <<", tid: "<< tid <<"] dt: "<<duration.count()<<" us"<<endl;
@@ -685,9 +699,6 @@ class ThreadManager{
         __m128d d2;
         trace(ro, rd0, rd1, trap0, trap1, d2); // dependent loop, 10000 * 24
         
-
-        
-
 
         vec3 col(0.);                          
         vec3 sd = glm::normalize(camera_pos);  
