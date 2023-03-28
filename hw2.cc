@@ -37,6 +37,12 @@ using namespace oneapi::tbb;
 #define N_BATCH_JOB 100
 #define N_BATCH_TASK 400
 
+#define N_BATCH_JOB_2 1
+#define N_BATCH_TASK_2 4
+
+
+
+
 typedef glm::dvec2 vec2;  
 typedef glm::dvec3 vec3;  
 typedef glm::dvec4 vec4;  
@@ -84,12 +90,17 @@ void batch_md(vec3 *p, double *trap, int n_tasks, bool *iterCmplt, double *len) 
             v[k] = p[k];
             dr[k] = 1.;            
             r[k] = glm::length(v[k]); 
-            trap[k] = r[k];
+
+            if(trap) trap[k] = r[k];
             can_break[k] = false;
         }
 
     }
 
+
+
+    double buf_pd[2];
+    __m128d oprn1, oprn2;
 
 
     for (int i = 0; i < md_iter; ++i) {
@@ -99,14 +110,34 @@ void batch_md(vec3 *p, double *trap, int n_tasks, bool *iterCmplt, double *len) 
 
             if(can_break[k])continue;
 
-            theta = glm::atan(v[k].y, v[k].x) * power;
-            phi = glm::asin(v[k].z / r[k]) * power;
+
+            if(!(v[k].x)){
+                oprn1 = _mm_set_pd(v[k].y, v[k].z);
+                oprn2 = _mm_set_pd(v[k].x, r[k]);
+                _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2)); 
+                
+                oprn1 = _mm_set_pd(glm::atan(buf_pd[1]), glm::asin(buf_pd[0]));
+                oprn2 = _mm_set_pd(power, power); 
+                _mm_storeu_pd(buf_pd, _mm_mul_pd(oprn1, oprn2));
+
+                theta = buf_pd[1];
+                phi = buf_pd[0];
+
+            }
+            else{
+                theta = glm::atan(v[k].y, v[k].x) * power;
+                phi = glm::asin(v[k].z / r[k]) * power;
+            }
+
+
+
+
             dr[k] = power * glm::pow(r[k], power - 1.) * dr[k] + 1.;
             
             v[k] = p[k] + glm::pow(r[k], power) *
                         vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
 
-            trap[k] = glm::min(trap[k], r[k]);
+            if(trap) trap[k] = glm::min(trap[k], r[k]);
 
             r[k] = glm::length(v[k]);     
 
@@ -209,6 +240,8 @@ vec3 pal(double t, vec3 a, vec3 b, vec3 c, vec3 d) {
 }
 
 
+
+
 double softshadow(vec3 ro, vec3 rd, double k) {
     double res = 1.0;
     double t = 0.;  
@@ -219,6 +252,59 @@ double softshadow(vec3 ro, vec3 rd, double k) {
         t += glm::clamp(h, .001, step_limiter);  // move ray
     }
     return glm::clamp(res, .02, 1.);
+}
+
+
+void batch_softshadow(vec3 *ro, vec3 rd, double k0, int n_tasks, bool *needCompute, double *out) {
+
+
+    bool can_return[N_BATCH_TASK];
+    double res[N_BATCH_TASK], t[N_BATCH_TASK], h[N_BATCH_TASK];  
+    vec3 p[N_BATCH_TASK];
+
+
+    for(int k=0;k<n_tasks;k++){
+        if(!needCompute[k]){
+            can_return[k] = true;
+        }
+        else{
+            res[k] = 1.0;
+            t[k] = 0.;
+            p[k] = ro[k] + rd * t[k];
+            can_return[k] = false;
+        }
+    
+    }
+
+
+    for (int i = 0; i < shadow_step; ++i) {
+
+
+        batch_map(p, NULL, n_tasks, can_return, h);
+
+        for(int k=0;k<n_tasks;k++){
+            if(can_return[k])continue;
+
+            res[k] = glm::min(res[k], k0 * h[k] / t[k]);  
+            
+            if (res[k] < 0.02){
+                if(!can_return[k]){
+                    can_return[k] = true;
+                    out[k] = 0.02;
+                }
+            }
+            
+            t[k] += glm::clamp(h[k], .001, step_limiter);    
+            p[k] = ro[k] + rd * t[k]; 
+        }
+    }
+
+
+    for(int k=0;k<n_tasks;k++){
+        if(can_return[k])continue;
+
+        out[k] = glm::clamp(res[k], .02, 1.);
+    }
 }
 
 
@@ -606,23 +692,17 @@ class ThreadManager{
                 n_jobs++;
             }
 
-
             if(n_tasks){
-  
-            
                 batch_AA(taskArray, n_tasks, resultArray);
-
                 for(int k=0;k<n_jobs;k++){
                     for(int l=1;l<4;l++){
                         resultArray[4*k] += resultArray[4*k + l];
                     }
-
                     resultArray[4*k] /= (double)(AA * AA);
                     resultArray[4*k] *= 255.0;
                     jobArray[k].result = resultArray[4*k];
                     jobDoneQueue.push(jobArray[k]);
                 }
-
                 n_tasks = 0;
                 n_jobs = 0;
             }
@@ -633,42 +713,54 @@ class ThreadManager{
 
     void one_job(){
 
-        Job job;
-
+   
+        // Job job;
+        Task taskArray[N_BATCH_TASK_2];
+        Job jobArray[N_BATCH_JOB_2], job;
+        int n_tasks = 0, n_jobs = 0;
+        int i, j, k;
+        vec4 resultArray[N_BATCH_TASK_2];
+     
         
-    
-        if(!jobQueue.empty()){
+        while(n_jobs < N_BATCH_JOB_2){
+            if(jobQueue.empty()) break;
+            
             if(!jobQueue.try_pop(job)){
-                fprintf(stderr, "[pid %d][one_job()] pop failed.\n", rank);
-                return;
+                fprintf(stderr, "[pid %d][job()] pop failed.\n", rank);
+                continue;
             }
 
-            // auto start = high_resolution_clock::now();
-
-            
-            int i, j;
-        
+            jobArray[n_jobs].idx = job.idx;
             jobIdx2ImgCoord(job.idx, &i, &j);
-
-            job.result = vec4(0.);
 
             for (int m = 0; m < AA; ++m) {
                 for (int n = 0; n < AA; ++n) {
-                    
-                    job.result += partial_AA(i, j, m, n);
+                    taskArray[n_tasks].i = i;
+                    taskArray[n_tasks].j = j;
+                    taskArray[n_tasks].m = m;
+                    taskArray[n_tasks].n = n;
+                    n_tasks++;
                 }
-            } 
-            
-            job.result /= (double)(AA * AA);
-            job.result *= 255.0;
+            }    
+            n_jobs++;
+        }
 
-            // auto stop = high_resolution_clock::now();
-            // auto duration = duration_cast<microseconds>(stop - start);
-            
-            // jobTimeTbl[num_threads - 1] += (int)duration.count();
-            
-    
-            jobDoneQueue.push(job);
+
+
+
+        if(n_tasks){
+            batch_AA(taskArray, n_tasks, resultArray);
+            for(int k=0;k<n_jobs;k++){
+                for(int l=1;l<4;l++){
+                    resultArray[4*k] += resultArray[4*k + l];
+                }
+                resultArray[4*k] /= (double)(AA * AA);
+                resultArray[4*k] *= 255.0;
+                jobArray[k].result = resultArray[4*k];
+                jobDoneQueue.push(jobArray[k]);
+            }
+            n_tasks = 0;
+            n_jobs = 0;
         }
         
     }
@@ -703,7 +795,7 @@ class ThreadManager{
         vec3 cs = glm::normalize(glm::cross(cf, vec3(0., 1., 0.))); 
         vec3 cu = glm::normalize(glm::cross(cs, cf));        
 
-        vec3 col(0.);                          
+        vec3 col[N_BATCH_TASK];                          
         vec3 sd = glm::normalize(camera_pos);  
         vec3 sc = vec3(1., .9, .717); 
 
@@ -714,12 +806,24 @@ class ThreadManager{
         double trap[N_BATCH_TASK], d[N_BATCH_TASK];  
 
 
+        double buf_pd[2];
+        __m128d oprn1, oprn2;
+
+
         for(int i=0;i<n_tasks;i++){
             tsk = taskArray[i];
-            p[i] = vec2(tsk.j, tsk.i) + vec2(tsk.m, tsk.n) / (double)AA;
+
+            oprn1 = _mm_set_pd(tsk.m, tsk.n);
+            oprn2 = _mm_set_pd((double)AA, (double)AA);
+            _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2));
+            p[i] = vec2(tsk.j, tsk.i) + vec2(buf_pd[1], buf_pd[0]);
+
+
             uv[i] = (-iResolution.xy() + 2. * p[i]) / iResolution.y;
             uv[i].y *= -1;              
+
             rd[i] = glm::normalize(uv[i].x * cs + uv[i].y * cu + FOV * cf); 
+            col[i] = vec3(0.);
         }
 
         
@@ -727,48 +831,64 @@ class ThreadManager{
         batch_trace(ro, rd, n_tasks, trap, d); // dependent loop, 10000 * 24
         
 
+        vec3 pos[N_BATCH_TASK], nr[N_BATCH_TASK], ro_ss[N_BATCH_TASK];
 
+
+        bool needCompute[N_BATCH_TASK]; 
         for(int k=0;k<n_tasks;k++){
 
             if (d[k] < 0.) {        
-                col = vec3(0.);  
+                needCompute[k] = false;
+                // col[k] = vec3(0.);  
             } else {
-                vec3 pos = ro + rd[k] * d[k];             
-                vec3 nr = calcNor(pos);             
+                needCompute[k] = true;
+                pos[k] = ro + rd[k] * d[k];             
+                nr[k] = calcNor(pos[k]);   
+                ro_ss[k] = pos[k] + .001 * nr[k];
+            }
+        }
+
+
+        double sdw[N_BATCH_TASK];
+    
+        batch_softshadow(ro_ss, sd, 16., n_tasks, needCompute, sdw);    // dependent loop, 1500
+
+       
+
+        for(int k=0;k<n_tasks;k++){
+
+            if (d[k] >= 0.) {
+
                 vec3 hal = glm::normalize(sd - rd[k]); 
                 
-
-                col = pal(trap[k] - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
+                col[k] = pal(trap[k] - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
                 vec3 ambc = vec3(0.3); 
                 double gloss = 32.;    
 
                 double amb =
-                    (0.7 + 0.3 * nr.y) *
+                    (0.7 + 0.3 * nr[k].y) *
                     (0.2 + 0.8 * glm::clamp(0.05 * log(trap[k]), 0.0, 1.0));  
 
 
-
-                double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
-
-
-
-                double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
-                double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
+                double dif = glm::clamp(glm::dot(sd, nr[k]), 0., 1.) * sdw[k];   
+                double spe = glm::pow(glm::clamp(glm::dot(nr[k], hal), 0., 1.), gloss) * dif;  
 
 
                 vec3 lin(0.);
                 lin += ambc * (.05 + .95 * amb);  
                 lin += sc * dif * 0.8;            
-                col *= lin;
+                col[k] *= lin;
 
-                col = glm::pow(col, vec3(.7, .9, 1.)); 
-                col += spe * 0.8;                      
+                col[k] = glm::pow(col[k], vec3(.7, .9, 1.)); 
+                col[k] += spe * 0.8;                      
             }
 
-            col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
-            resultArray[k] = vec4(col, 1.);
+            col[k] = glm::clamp(glm::pow(col[k], vec3(.4545)), 0., 1.); 
+            resultArray[k] = vec4(col[k], 1.);
             
         }
+
+   
 
     }
 
