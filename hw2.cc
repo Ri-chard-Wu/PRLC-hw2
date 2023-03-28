@@ -24,8 +24,18 @@ using namespace oneapi::tbb;
 
 #define pi 3.1415926535897932384626433832795
 
-#define N_JOB 10
-#define N_TASK 40
+
+
+#define MPI_TAG_JOB_ASSIGN 0
+#define MPI_TAG_JOB_CANCEL 1
+#define MPI_TAG_TERMINATE 2
+#define MPI_TAG_JOB_UPLOAD 3
+
+#define BUF_SIZE_JOB_UPLOAD 4000
+#define BUF_SIZE_JOB_SCHDL 5000
+
+#define N_BATCH_JOB 100
+#define N_BATCH_TASK 400
 
 typedef glm::dvec2 vec2;  
 typedef glm::dvec3 vec3;  
@@ -56,21 +66,28 @@ void write_png(const char* filename, unsigned char* raw_image, unsigned int widt
 
 
 
-void batch_md(vec3 *p, double *trap, int n_tasks, double *len) {
+void batch_md(vec3 *p, double *trap, int n_tasks, bool *iterCmplt, double *len) {
 
-    int n_can_break = 0;
-    bool can_break[N_TASK];
-    double dr[N_TASK], r[N_TASK], theta, phi;
+    int n_can_break = 0, n_remaining_tasks = n_tasks;
+    bool can_break[N_BATCH_TASK];
+    double dr[N_BATCH_TASK], r[N_BATCH_TASK], theta, phi;
 
-    vec3* v = p;
+    vec3 v[N_BATCH_TASK];
 
 
 
     for(int k=0;k<n_tasks;k++){
-        dr[k] = 1.;            
-        r[k] = glm::length(v[k]); 
-        trap[k] = r[k];
-        can_break[k] = false;
+        if(iterCmplt[k]){
+            n_remaining_tasks--;
+        }
+        else{
+            v[k] = p[k];
+            dr[k] = 1.;            
+            r[k] = glm::length(v[k]); 
+            trap[k] = r[k];
+            can_break[k] = false;
+        }
+
     }
 
 
@@ -78,6 +95,8 @@ void batch_md(vec3 *p, double *trap, int n_tasks, double *len) {
     for (int i = 0; i < md_iter; ++i) {
 
         for(int k=0;k<n_tasks;k++){
+            if(iterCmplt[k])continue;
+
             if(can_break[k])continue;
 
             theta = glm::atan(v[k].y, v[k].x) * power;
@@ -95,17 +114,18 @@ void batch_md(vec3 *p, double *trap, int n_tasks, double *len) {
                 if(!can_break[k]){
                     can_break[k] = true;
                     n_can_break++;
-                    if(n_can_break == n_tasks)break;
+                    if(n_can_break == n_remaining_tasks)break;
                 }
             }
         }
 
-        if(n_can_break == n_tasks)break;
+        if(n_can_break == n_remaining_tasks)break;
     }
 
 
 
     for(int k=0;k<n_tasks;k++){
+        if(iterCmplt[k])continue;
         len[k] = 0.5 * log(r[k]) * r[k] / dr[k];
     }
 }
@@ -113,20 +133,22 @@ void batch_md(vec3 *p, double *trap, int n_tasks, double *len) {
 
 
 
-void batch_map(vec3 *p, double *trap, int n_tasks, double *len) {
+void batch_map(vec3 *p, double *trap, int n_tasks, bool *iterCmplt, double *len) {
     
     vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
-    vec3 rp[N_TASK];
+    vec3 rp[N_BATCH_TASK];
 
 
 
     for(int k=0;k<n_tasks;k++){
+        if(iterCmplt[k])continue;
+
         rp[k] = mat3(1.,   0.,    0.,
                     0., rt.x, -rt.y, 
                     0., rt.y,  rt.x) * p[k];  
     }
 
-    batch_md(rp, trap, n_tasks, len);
+    batch_md(rp, trap, n_tasks, iterCmplt, len);
 }
 
 
@@ -177,8 +199,7 @@ double map(vec3 p, double& trap) {
 
 double map(vec3 p) {
     double dmy;  // dummy
-    int dmy2;    // dummy2
-    return map(p, dmy, dmy2);
+    return map(p, dmy);
 }
 
 
@@ -210,22 +231,42 @@ vec3 calcNor(vec3 p) {
 }
 
 
-void trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
+
+
+double trace(vec3 ro, vec3 rd, double& trap) {
+    double t = 0;    
+    double len = 0;  
+
+    for (int i = 0; i < ray_step; ++i) {
+
+        len = map(ro + rd * t, trap);  
+        if (glm::abs(len) < eps || t > far_plane) break;
+        t += len * ray_multiplier;
+    }
+
+    return t < far_plane ? t : -1.;  
+}
+
+
+
+void batch_trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
     
-    double t[N_TASK] = 0, len[N_TASK] = 0;
-    vec3 p[N_TASK];
+    double t[N_BATCH_TASK], len[N_BATCH_TASK];
+    vec3 p[N_BATCH_TASK];
 
     int n_can_break = 0;
-    bool can_break[N_TASK];
+    bool can_break[N_BATCH_TASK];
     for(int k = 0; k < n_tasks; k++){
         can_break[k] = false;
+        t[k] = 0;
         p[k] = ro + rd[k] * t[k];
+        len[k] = 0;
     }
 
 
     for (int i = 0; i < ray_step; ++i) {
 
-        batch_map(p, trap, n_tasks, len);  
+        batch_map(p, trap, n_tasks, can_break, len);  
 
         for(int k = 0; k < n_tasks; k++){
             if(can_break[k])continue;
@@ -237,9 +278,11 @@ void trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
                     if(n_can_break == n_tasks) break;
                 }
             }
-            
-            t[k] += len[k] * ray_multiplier;
-            p[k] = ro + rd[k] * t[k];
+            else{
+                t[k] += len[k] * ray_multiplier;
+                p[k] = ro + rd[k] * t[k];
+            }
+
         }
 
 
@@ -260,13 +303,6 @@ void trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
 
 
 
-#define MPI_TAG_JOB_ASSIGN 0
-#define MPI_TAG_JOB_CANCEL 1
-#define MPI_TAG_TERMINATE 2
-#define MPI_TAG_JOB_UPLOAD 3
-
-#define BUF_SIZE_JOB_UPLOAD 4000
-#define BUF_SIZE_JOB_SCHDL 5000
 
 typedef int jobIdx_t;
 
@@ -535,16 +571,16 @@ class ThreadManager{
     void job(int tid){
 
         // Job job;
-        Task taskArray[N_TASK];
-        Job jobArray[N_JOB];
+        Task taskArray[N_BATCH_TASK];
+        Job jobArray[N_BATCH_JOB], job;
         int n_tasks = 0, n_jobs = 0;
-        int i, j;
-        vec4 resultArray[N_TASK];
+        int i, j, k;
+        vec4 resultArray[N_BATCH_TASK];
      
 
         while(1){
             
-            for(int k=0;k < N_JOB; k++){
+            while(n_jobs < N_BATCH_JOB){
                 if(jobQueue.empty()) break;
                 
                 if(!jobQueue.try_pop(job)){
@@ -552,16 +588,16 @@ class ThreadManager{
                     continue;
                 }
 
-                jobArray[k].idx = job.idx;
+                jobArray[n_jobs].idx = job.idx;
 
                 jobIdx2ImgCoord(job.idx, &i, &j);
 
                 for (int m = 0; m < AA; ++m) {
                     for (int n = 0; n < AA; ++n) {
-                        taskArray[k].i = i;
-                        taskArray[k].j = j;
-                        taskArray[k].m = m;
-                        taskArray[k].n = n;
+                        taskArray[n_tasks].i = i;
+                        taskArray[n_tasks].j = j;
+                        taskArray[n_tasks].m = m;
+                        taskArray[n_tasks].n = n;
 
                         n_tasks++;
                     }
@@ -569,9 +605,6 @@ class ThreadManager{
 
                 n_jobs++;
             }
-
-
-
 
 
             if(n_tasks){
@@ -610,7 +643,7 @@ class ThreadManager{
                 return;
             }
 
-            auto start = high_resolution_clock::now();
+            // auto start = high_resolution_clock::now();
 
             
             int i, j;
@@ -629,8 +662,8 @@ class ThreadManager{
             job.result /= (double)(AA * AA);
             job.result *= 255.0;
 
-            auto stop = high_resolution_clock::now();
-            auto duration = duration_cast<microseconds>(stop - start);
+            // auto stop = high_resolution_clock::now();
+            // auto duration = duration_cast<microseconds>(stop - start);
             
             // jobTimeTbl[num_threads - 1] += (int)duration.count();
             
@@ -660,7 +693,7 @@ class ThreadManager{
     }
 
 
-    vec4 batch_AA(Task *taskArray, int n_tasks, vec4 *resultArray){
+    void batch_AA(Task *taskArray, int n_tasks, vec4 *resultArray){
 
         vec2 iResolution = vec2(width, height);
 
@@ -675,10 +708,10 @@ class ThreadManager{
         vec3 sc = vec3(1., .9, .717); 
 
 
-        vec2 p[N_TASK], uv[N_TASK];
-        vec3 rd[N_TASK];
+        vec2 p[N_BATCH_TASK], uv[N_BATCH_TASK];
+        vec3 rd[N_BATCH_TASK];
         Task tsk;
-        double trap[N_TASK], d[N_TASK];  
+        double trap[N_BATCH_TASK], d[N_BATCH_TASK];  
 
 
         for(int i=0;i<n_tasks;i++){
@@ -691,7 +724,7 @@ class ThreadManager{
 
         
 
-        trace(ro, rd, n_tasks, trap, d); // dependent loop, 10000 * 24
+        batch_trace(ro, rd, n_tasks, trap, d); // dependent loop, 10000 * 24
         
 
 
@@ -713,8 +746,12 @@ class ThreadManager{
                     (0.7 + 0.3 * nr.y) *
                     (0.2 + 0.8 * glm::clamp(0.05 * log(trap[k]), 0.0, 1.0));  
 
+
+
                 double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
-                    
+
+
+
                 double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
                 double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
 
@@ -734,6 +771,75 @@ class ThreadManager{
         }
 
     }
+
+
+
+
+
+    vec4 partial_AA(int i, int j, int m, int n){
+
+        vec2 iResolution = vec2(width, height);
+
+        vec2 p = vec2(j, i) + vec2(m, n) / (double)AA;
+
+        vec2 uv = (-iResolution.xy() + 2. * p) / iResolution.y;
+        uv.y *= -1;  
+
+        vec3 ro = camera_pos;               
+        vec3 ta = target_pos;               
+        vec3 cf = glm::normalize(ta - ro);  
+        vec3 cs = glm::normalize(glm::cross(cf, vec3(0., 1., 0.))); 
+        vec3 cu = glm::normalize(glm::cross(cs, cf));               
+        vec3 rd = glm::normalize(uv.x * cs + uv.y * cu + FOV * cf); 
+        
+        double trap;  
+        double d = trace(ro, rd, trap); // dependent loop, 10000 * 24
+        
+        vec3 col(0.);                          
+        vec3 sd = glm::normalize(camera_pos);  
+        vec3 sc = vec3(1., .9, .717);          
+        
+
+        if (d < 0.) {        
+            col = vec3(0.);  
+        } else {
+            vec3 pos = ro + rd * d;             
+            vec3 nr = calcNor(pos);             
+            vec3 hal = glm::normalize(sd - rd); 
+            
+
+            col = pal(trap - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
+            vec3 ambc = vec3(0.3); 
+            double gloss = 32.;    
+
+            double amb =
+                (0.7 + 0.3 * nr.y) *
+                (0.2 + 0.8 * glm::clamp(0.05 * log(trap), 0.0, 1.0));  
+
+            double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
+                
+            double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
+            double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
+
+
+            vec3 lin(0.);
+            lin += ambc * (.05 + .95 * amb);  
+            lin += sc * dif * 0.8;            
+            col *= lin;
+
+            col = glm::pow(col, vec3(.7, .9, 1.)); 
+            col += spe * 0.8;                      
+        }
+        
+
+        col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
+
+        return vec4(col, 1.);
+    }
+
+
+
+
 
 
     int rank, worldSize;
@@ -858,7 +964,7 @@ class ProcessManager{
 
     
 
-        if(tmPtr->jobQueue.unsafe_size() < 10 * tmPtr->nThrds){
+        if(tmPtr->jobQueue.unsafe_size() < 2 * tmPtr->nThrds * N_BATCH_JOB){
             
 
             for(int i=0; i < 10 * tmPtr->nThrds; i++){
@@ -1259,7 +1365,7 @@ class Process{
 
         // static int cnt=startIdx;
 
-        if(tmPtr->jobQueue.unsafe_size() < 10 * tmPtr->nThrds){
+        if(tmPtr->jobQueue.unsafe_size() < 2 * tmPtr->nThrds * N_BATCH_JOB){
             for(int i=0; i < 10 * tmPtr->nThrds; i++){
                 
                 
@@ -1495,14 +1601,22 @@ int main(int argc, char** argv) {
     if(rank == 0){
 
         ProcessManager pm(argv, rank, worldSize);
+
+        auto start = high_resolution_clock::now();
+
         pm.start_process();
 
-        fprintf(stdout, "[proc %d][main()] b\n", rank);
+        auto stop = high_resolution_clock::now();
+        auto duration = duration_cast<microseconds>(stop - start);
+        
+        // fprintf(stdout, "[proc %d][main()] b\n", rank);
+
+        cerr<<"dt: "<<duration.count()<<" us"<<endl;
 
         // pm.write_png();
         write_png(&pm);
 
-        fprintf(stdout, "[proc %d][main()] c\n", rank);
+        // fprintf(stdout, "[proc %d][main()] c\n", rank);
     }
     else{
         Process proc(argv, rank, worldSize);
@@ -1510,7 +1624,7 @@ int main(int argc, char** argv) {
         
     }
 
-    fprintf(stdout, "[proc %d][main()] d\n", rank);
+    // fprintf(stdout, "[proc %d][main()] d\n", rank);
 
    
 
