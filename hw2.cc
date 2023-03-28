@@ -24,6 +24,9 @@ using namespace oneapi::tbb;
 
 #define pi 3.1415926535897932384626433832795
 
+#define N_JOB 10
+#define N_TASK 40
+
 typedef glm::dvec2 vec2;  
 typedef glm::dvec3 vec3;  
 typedef glm::dvec4 vec4;  
@@ -52,10 +55,8 @@ void write_png(const char* filename, unsigned char* raw_image, unsigned int widt
 
 
 
-double md(vec3 p, double& trap) {
 
-    double buf_pd[2];
-    __m128d oprn1, oprn2;
+void batch_md(vec3 p, double *trap, int n_tasks, double *len) {
 
     vec3 v = p;
     double dr = 1.;            
@@ -64,26 +65,57 @@ double md(vec3 p, double& trap) {
 
     for (int i = 0; i < md_iter; ++i) {
 
-        oprn1 = _mm_set_pd(v.y, v.z);
-        oprn2 = _mm_set_pd(v.x, r);
-        _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2)); 
-
-        oprn1 = _mm_set_pd(glm::atan(buf_pd[1]), glm::asin(buf_pd[0]));
-        oprn2 = _mm_set_pd(power, power);   
-        _mm_storeu_pd(buf_pd, _mm_mul_pd(oprn1, oprn2)); 
-        
-        double theta = buf_pd[1];
-        double phi = buf_pd[0];
-
-
-        
-
+        double theta = glm::atan(v.y, v.x) * power;
+        double phi = glm::asin(v.z / r) * power;
         dr = power * glm::pow(r, power - 1.) * dr + 1.;
+        
+        v = p + glm::pow(r, power) *
+                    vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
 
-        // oprn1 = _mm_set_pd(, );
-        // oprn2 = _mm_set_pd(, );   
-        // _mm_storeu_pd(buf_pd, _mm_mul_pd(oprn1, oprn2)); 
-                
+        trap = glm::min(trap, r);
+
+        r = glm::length(v);      
+        if (r > bailout) break;  
+
+    }
+
+
+    for(int k=0;k<n_tasks;k++){
+        len[k] = 0.5 * log(r[k]) * r[k] / dr[k];
+    }
+}
+
+
+
+
+void batch_map(vec3 p, double *trap, int n_tasks, double *len) {
+    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
+
+    vec3 rp = mat3(1.,   0.,    0.,
+                   0., rt.x, -rt.y, 
+                   0., rt.y,  rt.x) * p;  
+    
+
+    batch_md(rp, trap, len);
+}
+
+
+
+
+
+
+double md(vec3 p, double& trap) {
+    vec3 v = p;
+    double dr = 1.;            
+    double r = glm::length(v); 
+    trap = r;
+
+    for (int i = 0; i < md_iter; ++i) {
+
+        double theta = glm::atan(v.y, v.x) * power;
+        double phi = glm::asin(v.z / r) * power;
+        dr = power * glm::pow(r, power - 1.) * dr + 1.;
+        
         v = p + glm::pow(r, power) *
                     vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
 
@@ -98,24 +130,19 @@ double md(vec3 p, double& trap) {
 
 }
 
-    // double buf_pd[2];
-    // __m128d oprn1, oprn2;
-    
-    // oprn1 = _mm_set_pd(v.y, v.z);
-    // oprn2 = _mm_set_pd(v.x, r);
-    // _mm_storeu_pd(buf_pd, _mm_div_pd(oprn1, oprn2));
 
-double map(vec3 p, double& trap, int& ID) {
 
-    double pi_2 = pi / 2.;
-    vec2 rt = vec2(cos(pi_2), sin(pi_2));
+double map(vec3 p, double& trap) {
+    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
 
     vec3 rp = mat3(1.,   0.,    0.,
                    0., rt.x, -rt.y, 
                    0., rt.y,  rt.x) * p;  
-    ID = 1;
+    
     return md(rp, trap);
 }
+
+
 
 
 double map(vec3 p) {
@@ -153,18 +180,22 @@ vec3 calcNor(vec3 p) {
 }
 
 
-double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
-    double t = 0;    
-    double len = 0;  
+void trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
+    double t[N_TASK] = 0, len[N_TASK] = 0;
 
     for (int i = 0; i < ray_step; ++i) {
 
-        len = map(ro + rd * t, trap, ID);  
+        batch_map(ro + rd * t, trap, n_tasks, len);  
+
         if (glm::abs(len) < eps || t > far_plane) break;
+        
         t += len * ray_multiplier;
     }
 
-    return t < far_plane ? t : -1.;  
+
+    for(int i=0;i<n_tasks;i++){
+        d[i] = t[i] < far_plane ? t[i] : -1.;
+    }
 }
 
 
@@ -368,7 +399,13 @@ struct PCB{
     MapQueue<int> jobQueue;
 };
 
-
+struct Task{
+    int i;
+    int j;
+    int m;
+    int n;
+    vec4 result;
+};
 
 
 
@@ -441,47 +478,66 @@ class ThreadManager{
 
 
 
-
     void job(int tid){
 
-        Job job;
+        // Job job;
+        Task taskArray[N_TASK];
+        Job jobArray[N_JOB];
+        int n_tasks = 0, n_jobs = 0;
+        int i, j;
+        vec4 resultArray[N_TASK];
      
 
         while(1){
-            if(!jobQueue.empty()){
-
+            
+            for(int k=0;k < N_JOB; k++){
+                if(jobQueue.empty()) break;
+                
                 if(!jobQueue.try_pop(job)){
                     fprintf(stderr, "[pid %d][job()] pop failed.\n", rank);
                     continue;
                 }
 
-          
-                // auto start = high_resolution_clock::now();
+                jobArray[k].idx = job.idx;
 
-                int i, j;
-            
                 jobIdx2ImgCoord(job.idx, &i, &j);
-                job.result = vec4(0.);
 
                 for (int m = 0; m < AA; ++m) {
                     for (int n = 0; n < AA; ++n) {
-                    
-                        job.result += partial_AA(i, j, m, n);
+                        taskArray[k].i = i;
+                        taskArray[k].j = j;
+                        taskArray[k].m = m;
+                        taskArray[k].n = n;
 
+                        n_tasks++;
                     }
-                }       
- 
-                job.result /= (double)(AA * AA);
-                job.result *= 255.0;
-                jobDoneQueue.push(job);
+                }    
 
-                // auto stop = high_resolution_clock::now();
-                // auto duration = duration_cast<microseconds>(stop - start);
-                // cerr<<"[pid "<< rank <<", tid: "<< tid <<"] dt: "<<duration.count()<<" us"<<endl;
-                // fprintf(stderr, "[pid %d, tid: %d] fprintf(): dt: %d us\n", rank, tid, (int)duration.count());
+                n_jobs++;
+            }
 
-                // jobTimeTbl[tid] += (int)duration.count();
 
+
+
+
+            if(n_tasks){
+  
+            
+                batch_AA(taskArray, n_tasks, resultArray);
+
+                for(int k=0;k<n_jobs;k++){
+                    for(int l=1;l<4;l++){
+                        resultArray[4*k] += resultArray[4*k + l];
+                    }
+
+                    resultArray[4*k] /= (double)(AA * AA);
+                    resultArray[4*k] *= 255.0;
+                    jobArray[k].result = resultArray[4*k];
+                    jobDoneQueue.push(jobArray[k]);
+                }
+
+                n_tasks = 0;
+                n_jobs = 0;
             }
         }
     }
@@ -500,7 +556,7 @@ class ThreadManager{
                 return;
             }
 
-            // auto start = high_resolution_clock::now();
+            auto start = high_resolution_clock::now();
 
             
             int i, j;
@@ -519,10 +575,9 @@ class ThreadManager{
             job.result /= (double)(AA * AA);
             job.result *= 255.0;
 
-            // auto stop = high_resolution_clock::now();
-            // auto duration = duration_cast<microseconds>(stop - start);
-            // cerr<<"[pid "<< rank <<"] dt: "<<duration.count()<<" us"<<endl;
-
+            auto stop = high_resolution_clock::now();
+            auto duration = duration_cast<microseconds>(stop - start);
+            
             // jobTimeTbl[num_threads - 1] += (int)duration.count();
             
     
@@ -551,83 +606,79 @@ class ThreadManager{
     }
 
 
-    vec4 partial_AA(int i, int j, int m, int n){
+    vec4 batch_AA(Task *taskArray, int n_tasks, vec4 *resultArray){
 
         vec2 iResolution = vec2(width, height);
-
-        vec2 p = vec2(j, i) + vec2(m, n) / (double)AA;
-
-        vec2 uv = (-iResolution.xy() + 2. * p) / iResolution.y;
-        uv.y *= -1;  
 
         vec3 ro = camera_pos;               
         vec3 ta = target_pos;               
         vec3 cf = glm::normalize(ta - ro);  
         vec3 cs = glm::normalize(glm::cross(cf, vec3(0., 1., 0.))); 
-        vec3 cu = glm::normalize(glm::cross(cs, cf));               
-        vec3 rd = glm::normalize(uv.x * cs + uv.y * cu + FOV * cf); 
-        
-        double trap;  
-        int objID;    
+        vec3 cu = glm::normalize(glm::cross(cs, cf));        
 
-        // auto start = high_resolution_clock::now();
-
-        double d = trace(ro, rd, trap, objID); // dependent loop, 10000 * 24
-        
-        // auto stop = high_resolution_clock::now();
-        // auto duration = duration_cast<microseconds>(stop - start);
-        // cerr<<" trace() dt: "<<duration.count()<<" us"<<endl;
-        
-        
-        
         vec3 col(0.);                          
         vec3 sd = glm::normalize(camera_pos);  
-        vec3 sc = vec3(1., .9, .717);          
-        
-
-        if (d < 0.) {        
-            col = vec3(0.);  
-        } else {
-            vec3 pos = ro + rd * d;             
-            vec3 nr = calcNor(pos);             
-            vec3 hal = glm::normalize(sd - rd); 
-            
-
-            col = pal(trap - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
-            vec3 ambc = vec3(0.3); 
-            double gloss = 32.;    
-
-            double amb =
-                (0.7 + 0.3 * nr.y) *
-                (0.2 + 0.8 * glm::clamp(0.05 * log(trap), 0.0, 1.0));  
-
-            // start = high_resolution_clock::now();
-
-            double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
-            
-            // stop = high_resolution_clock::now();
-            // duration = duration_cast<microseconds>(stop - start);
-            // cerr<<" softshadow() dt: "<<duration.count()<<" us"<<endl;
-            
-            
-                
-            double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
-            double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
+        vec3 sc = vec3(1., .9, .717); 
 
 
-            vec3 lin(0.);
-            lin += ambc * (.05 + .95 * amb);  
-            lin += sc * dif * 0.8;            
-            col *= lin;
+        vec2 p[N_TASK], uv[N_TASK];
+        vec3 rd[N_TASK];
+        Task tsk;
+        double trap[N_TASK], d[N_TASK];  
 
-            col = glm::pow(col, vec3(.7, .9, 1.)); 
-            col += spe * 0.8;                      
+
+        for(int i=0;i<n_tasks;i++){
+            tsk = taskArray[i];
+            p[i] = vec2(tsk.j, tsk.i) + vec2(tsk.m, tsk.n) / (double)AA;
+            uv[i] = (-iResolution.xy() + 2. * p[i]) / iResolution.y;
+            uv[i].y *= -1;              
+            rd[i] = glm::normalize(uv[i].x * cs + uv[i].y * cu + FOV * cf); 
         }
+
         
 
-        col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
+        trace(ro, rd, n_tasks, trap, d); // dependent loop, 10000 * 24
+        
 
-        return vec4(col, 1.);
+
+        for(int k=0;k<n_tasks;k++){
+
+            if (d[k] < 0.) {        
+                col = vec3(0.);  
+            } else {
+                vec3 pos = ro + rd[k] * d[k];             
+                vec3 nr = calcNor(pos);             
+                vec3 hal = glm::normalize(sd - rd[k]); 
+                
+
+                col = pal(trap[k] - .4, vec3(.5), vec3(.5), vec3(1.), vec3(.0, .1, .2));  
+                vec3 ambc = vec3(0.3); 
+                double gloss = 32.;    
+
+                double amb =
+                    (0.7 + 0.3 * nr.y) *
+                    (0.2 + 0.8 * glm::clamp(0.05 * log(trap[k]), 0.0, 1.0));  
+
+                double sdw = softshadow(pos + .001 * nr, sd, 16.);    // dependent loop, 1500
+                    
+                double dif = glm::clamp(glm::dot(sd, nr), 0., 1.) * sdw;   
+                double spe = glm::pow(glm::clamp(glm::dot(nr, hal), 0., 1.), gloss) * dif;  
+
+
+                vec3 lin(0.);
+                lin += ambc * (.05 + .95 * amb);  
+                lin += sc * dif * 0.8;            
+                col *= lin;
+
+                col = glm::pow(col, vec3(.7, .9, 1.)); 
+                col += spe * 0.8;                      
+            }
+
+            col = glm::clamp(glm::pow(col, vec3(.4545)), 0., 1.); 
+            resultArray[k] = vec4(col, 1.);
+            
+        }
+
     }
 
 
@@ -778,8 +829,6 @@ class ProcessManager{
         dynamic_job_enqueue();
         tmPtr->start_thread();
 
-        auto start = high_resolution_clock::now();
-
         while(1){
 
             if(!tmPtr->jobQueue.empty()){
@@ -792,7 +841,7 @@ class ProcessManager{
             }
             else{
                 local_receive_completed_jobs(); // 350 us
-                if(check_send_terminate_signal()) break;
+                if(check_send_terminate_signal()) return;
             }
 
             receive_completed_jobs(); // probe: 2us. if true: 250 us
@@ -800,15 +849,9 @@ class ProcessManager{
             dynamic_job_enqueue(); // if true: 24 us.
 
             // probe_load_distribution();
-        } 
-
-        auto stop = high_resolution_clock::now();
-        auto duration = duration_cast<microseconds>(stop - start);
-        cerr<< " total run time: "<<duration.count()<<" us"<<endl;
-        
+        }  
     }
-
-
+    
 
 
 
