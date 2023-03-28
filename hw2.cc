@@ -56,28 +56,53 @@ void write_png(const char* filename, unsigned char* raw_image, unsigned int widt
 
 
 
-void batch_md(vec3 p, double *trap, int n_tasks, double *len) {
+void batch_md(vec3 *p, double *trap, int n_tasks, double *len) {
 
-    vec3 v = p;
-    double dr = 1.;            
-    double r = glm::length(v); 
-    trap = r;
+    int n_can_break = 0;
+    bool can_break[N_TASK];
+    double dr[N_TASK], r[N_TASK], theta, phi;
+
+    vec3* v = p;
+
+
+
+    for(int k=0;k<n_tasks;k++){
+        dr[k] = 1.;            
+        r[k] = glm::length(v[k]); 
+        trap[k] = r[k];
+        can_break[k] = false;
+    }
+
+
 
     for (int i = 0; i < md_iter; ++i) {
 
-        double theta = glm::atan(v.y, v.x) * power;
-        double phi = glm::asin(v.z / r) * power;
-        dr = power * glm::pow(r, power - 1.) * dr + 1.;
-        
-        v = p + glm::pow(r, power) *
-                    vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
+        for(int k=0;k<n_tasks;k++){
+            if(can_break[k])continue;
 
-        trap = glm::min(trap, r);
+            theta = glm::atan(v[k].y, v[k].x) * power;
+            phi = glm::asin(v[k].z / r[k]) * power;
+            dr[k] = power * glm::pow(r[k], power - 1.) * dr[k] + 1.;
+            
+            v[k] = p[k] + glm::pow(r[k], power) *
+                        vec3(cos(theta) * cos(phi), cos(phi) * sin(theta), -sin(phi));  // update vk+1
 
-        r = glm::length(v);      
-        if (r > bailout) break;  
+            trap[k] = glm::min(trap[k], r[k]);
 
+            r[k] = glm::length(v[k]);     
+
+            if (r[k] > bailout){
+                if(!can_break[k]){
+                    can_break[k] = true;
+                    n_can_break++;
+                    if(n_can_break == n_tasks)break;
+                }
+            }
+        }
+
+        if(n_can_break == n_tasks)break;
     }
+
 
 
     for(int k=0;k<n_tasks;k++){
@@ -88,15 +113,20 @@ void batch_md(vec3 p, double *trap, int n_tasks, double *len) {
 
 
 
-void batch_map(vec3 p, double *trap, int n_tasks, double *len) {
-    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
-
-    vec3 rp = mat3(1.,   0.,    0.,
-                   0., rt.x, -rt.y, 
-                   0., rt.y,  rt.x) * p;  
+void batch_map(vec3 *p, double *trap, int n_tasks, double *len) {
     
+    vec2 rt = vec2(cos(pi / 2.), sin(pi / 2.));
+    vec3 rp[N_TASK];
 
-    batch_md(rp, trap, len);
+
+
+    for(int k=0;k<n_tasks;k++){
+        rp[k] = mat3(1.,   0.,    0.,
+                    0., rt.x, -rt.y, 
+                    0., rt.y,  rt.x) * p[k];  
+    }
+
+    batch_md(rp, trap, n_tasks, len);
 }
 
 
@@ -181,15 +211,39 @@ vec3 calcNor(vec3 p) {
 
 
 void trace(vec3 ro, vec3 *rd, int n_tasks, double *trap, double *d) {
+    
     double t[N_TASK] = 0, len[N_TASK] = 0;
+    vec3 p[N_TASK];
+
+    int n_can_break = 0;
+    bool can_break[N_TASK];
+    for(int k = 0; k < n_tasks; k++){
+        can_break[k] = false;
+        p[k] = ro + rd[k] * t[k];
+    }
+
 
     for (int i = 0; i < ray_step; ++i) {
 
-        batch_map(ro + rd * t, trap, n_tasks, len);  
+        batch_map(p, trap, n_tasks, len);  
 
-        if (glm::abs(len) < eps || t > far_plane) break;
-        
-        t += len * ray_multiplier;
+        for(int k = 0; k < n_tasks; k++){
+            if(can_break[k])continue;
+            
+            if (glm::abs(len[k]) < eps || t[k] > far_plane){
+                if(!can_break[k]){
+                    can_break[k] = true;
+                    n_can_break++;
+                    if(n_can_break == n_tasks) break;
+                }
+            }
+            
+            t[k] += len[k] * ray_multiplier;
+            p[k] = ro + rd[k] * t[k];
+        }
+
+
+        if(n_can_break == n_tasks) break;
     }
 
 
